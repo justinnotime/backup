@@ -71,7 +71,7 @@ backup_openclaw() {
   local memory_db_dst="$OPENCLAW_BACKUP_DIR/memory-db"
   if [ -f "$memory_db_src" ]; then
     mkdir -p "$memory_db_dst"
-    cp -u "$memory_db_src" "$memory_db_dst/"
+    rsync -a --update "$memory_db_src" "$memory_db_dst/"
     local size=$(du -h "$memory_db_src" | cut -f1)
     log "  Memory DB: $size → $memory_db_dst/main.sqlite"
   else
@@ -85,7 +85,7 @@ backup_openclaw() {
     mkdir -p "$workspace_dst"
     for file in SOUL.md IDENTITY.md USER.md TOOLS.md AGENTS.md; do
       if [ -f "$workspace_src/$file" ]; then
-        cp -u "$workspace_src/$file" "$workspace_dst/"
+        rsync -a --update "$workspace_src/$file" "$workspace_dst/"
       fi
     done
     local count=$(ls -1 "$workspace_dst" 2>/dev/null | wc -l)
@@ -99,7 +99,7 @@ backup_openclaw() {
   local config_dst="$OPENCLAW_BACKUP_DIR/config"
   if [ -f "$config_src" ]; then
     mkdir -p "$config_dst"
-    cp -u "$config_src" "$config_dst/"
+    rsync -a --update "$config_src" "$config_dst/"
     log "  Config: openclaw.json → $config_dst"
   fi
 
@@ -134,7 +134,7 @@ backup_claude() {
   local history_dst="$CLAUDE_BACKUP_DIR/history"
   if [ -f "$history_src" ]; then
     mkdir -p "$history_dst"
-    cp -u "$history_src" "$history_dst/"
+    rsync -a --update "$history_src" "$history_dst/"
     local size=$(du -h "$history_src" | cut -f1)
     log "  History: $size → $history_dst/history.jsonl"
   else
@@ -146,7 +146,7 @@ backup_claude() {
   local settings_dst="$CLAUDE_BACKUP_DIR/config"
   if [ -f "$settings_src" ]; then
     mkdir -p "$settings_dst"
-    cp -u "$settings_src" "$settings_dst/"
+    rsync -a --update "$settings_src" "$settings_dst/"
     log "  Settings: settings.json → $settings_dst"
   fi
 
