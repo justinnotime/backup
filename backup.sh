@@ -20,10 +20,12 @@ SYNCTHING_ROOT="${SYNCTHING_ROOT:-$HOME/syncthing}"
 BACKUP_ROOT="${BACKUP_ROOT:-$SYNCTHING_ROOT/backup/$MACHINE_ID}"
 OPENCLAW_BACKUP_DIR="${OPENCLAW_BACKUP_DIR:-$BACKUP_ROOT/openclaw}"
 CLAUDE_BACKUP_DIR="${CLAUDE_BACKUP_DIR:-$BACKUP_ROOT/claude}"
+CODEX_BACKUP_DIR="${CODEX_BACKUP_DIR:-$BACKUP_ROOT/codex}"
 
 # Source directories
 OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
 CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
+CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 
 # Log
 BACKUP_LOG="${BACKUP_LOG:-$HOME/.local/log/backup.log}"
@@ -159,6 +161,50 @@ backup_claude() {
 }
 
 # ============================================================================
+# Codex Backup
+# ============================================================================
+backup_codex() {
+  log "=== Codex Backup ==="
+
+  local sessions_src="$CODEX_HOME/sessions"
+  local sessions_dst="$CODEX_BACKUP_DIR/sessions"
+  if [ -d "$sessions_src" ]; then
+    mkdir -p "$sessions_dst"
+    rsync -a --update "$sessions_src/" "$sessions_dst/"
+    local count=$(find "$sessions_src" -name "*.jsonl" 2>/dev/null | wc -l)
+    log "  Sessions: $count files → $sessions_dst"
+  else
+    log "  Sessions: source not found ($sessions_src)"
+  fi
+
+  local history_src="$CODEX_HOME/history.jsonl"
+  local history_dst="$CODEX_BACKUP_DIR/history"
+  if [ -f "$history_src" ]; then
+    mkdir -p "$history_dst"
+    cp -u "$history_src" "$history_dst/"
+    local size=$(du -h "$history_src" | cut -f1)
+    log "  History: $size → $history_dst/history.jsonl"
+  else
+    log "  History: source not found"
+  fi
+
+  local config_src="$CODEX_HOME/config.toml"
+  local config_dst="$CODEX_BACKUP_DIR/config"
+  if [ -f "$config_src" ]; then
+    mkdir -p "$config_dst"
+    cp -u "$config_src" "$config_dst/"
+    log "  Config: config.toml → $config_dst"
+  fi
+
+  if [ -d "$sessions_src" ] || [ -f "$history_src" ]; then
+    log "  Codex backup completed"
+    BACKED_UP_TOOLS+=("Codex")
+  else
+    log "  Codex not installed (skipped)"
+  fi
+}
+
+# ============================================================================
 # Main
 # ============================================================================
 main() {
@@ -166,9 +212,11 @@ main() {
   log "Backup targets:"
   log "  OpenClaw → $OPENCLAW_BACKUP_DIR"
   log "  Claude   → $CLAUDE_BACKUP_DIR"
+  log "  Codex    → $CODEX_BACKUP_DIR"
   
   backup_openclaw
   backup_claude
+  backup_codex
   
   log ""
   if [ ${#BACKED_UP_TOOLS[@]} -eq 0 ]; then

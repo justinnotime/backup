@@ -8,7 +8,7 @@ Unified backup solution for OpenClaw, Claude Code, and future AI tools (Codex, C
 ~/syncthing/backup/{machine-id}/
 ├── openclaw/          # OpenClaw sessions, memory, config
 ├── claude/            # Claude Code projects, history
-├── codex/             # (future)
+├── codex/             # Codex sessions, history, config
 └── cursor/            # (future)
 ```
 
@@ -43,8 +43,10 @@ SYNCTHING_ROOT="$HOME/syncthing"
 BACKUP_ROOT="$SYNCTHING_ROOT/backup/$MACHINE_ID"
 OPENCLAW_BACKUP_DIR="$BACKUP_ROOT/openclaw"
 CLAUDE_BACKUP_DIR="$BACKUP_ROOT/claude"
+CODEX_BACKUP_DIR="$BACKUP_ROOT/codex"
 OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
 CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
+CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 BACKUP_LOG="$HOME/.local/log/backup.log"
 EOF
 
@@ -78,16 +80,6 @@ For receive-only / hub machines that want ALL machines' data, leave `.stignore` 
 (crontab -l 2>/dev/null; echo '*/30 * * * * /home/$(whoami)/bin/backup >> ~/.local/log/backup-cron.log 2>&1') | crontab -
 ```
 
-## Adding New Tools
-
-Add to `~/.config/backup/config`:
-```bash
-CODEX_BACKUP_DIR="$BACKUP_ROOT/codex"
-CODEX_HOME="$HOME/.codex"
-```
-
-Then add a `backup_codex()` function in `backup.sh` and call it from `main()`.
-
 ## Diagnostics
 
 ```bash
@@ -107,6 +99,15 @@ tail -f ~/.local/log/backup.log  # View log
 - Projects: `~/.claude/projects/**` (conversations, subagents, tool-results)
 - History: `~/.claude/history.jsonl`
 - Settings: `~/.claude/settings.json`
+
+### Codex
+- Sessions: `~/.codex/sessions/**/*.jsonl`
+- History: `~/.codex/history.jsonl`
+- Config: `~/.codex/config.toml`
+
+## Adding New Tools
+
+Add new `*_BACKUP_DIR` and `*_HOME` variables in `~/.config/backup/config`, then add a matching `backup_<tool>()` function in `backup.sh` and call it from `main()`.
 
 ## License
 
