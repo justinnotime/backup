@@ -181,7 +181,7 @@ backup_codex() {
   local history_dst="$CODEX_BACKUP_DIR/history"
   if [ -f "$history_src" ]; then
     mkdir -p "$history_dst"
-    cp -u "$history_src" "$history_dst/"
+    rsync -a --update "$history_src" "$history_dst/"
     local size=$(du -h "$history_src" | cut -f1)
     log "  History: $size → $history_dst/history.jsonl"
   else
@@ -192,7 +192,7 @@ backup_codex() {
   local config_dst="$CODEX_BACKUP_DIR/config"
   if [ -f "$config_src" ]; then
     mkdir -p "$config_dst"
-    cp -u "$config_src" "$config_dst/"
+    rsync -a --update "$config_src" "$config_dst/"
     log "  Config: config.toml → $config_dst"
   fi
 
