@@ -9,7 +9,7 @@ Unified backup solution for OpenClaw, Claude Code, and future AI tools (Codex, C
 ├── openclaw/          # OpenClaw sessions, memory, config
 ├── claude/            # Claude Code projects, history
 ├── codex/             # Codex sessions, history, config
-└── cursor/            # (future)
+└── cursor/            # Cursor agent transcripts, chat DBs, settings
 ```
 
 - Single Syncthing folder for all AI tools
@@ -44,9 +44,12 @@ BACKUP_ROOT="$SYNCTHING_ROOT/backup/$MACHINE_ID"
 OPENCLAW_BACKUP_DIR="$BACKUP_ROOT/openclaw"
 CLAUDE_BACKUP_DIR="$BACKUP_ROOT/claude"
 CODEX_BACKUP_DIR="$BACKUP_ROOT/codex"
+CURSOR_BACKUP_DIR="$BACKUP_ROOT/cursor"
 OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
 CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+CURSOR_HOME="${CURSOR_HOME:-$HOME/.cursor}"
+CURSOR_USER_DIR="${CURSOR_USER_DIR:-$HOME/.config/Cursor/User}"
 BACKUP_LOG="$HOME/.local/log/backup.log"
 EOF
 
@@ -104,6 +107,11 @@ tail -f ~/.local/log/backup.log  # View log
 - Sessions: `~/.codex/sessions/**/*.jsonl`
 - History: `~/.codex/history.jsonl`
 - Config: `~/.codex/config.toml`
+
+### Cursor
+- Agent transcripts + per-project state: `~/.cursor/projects/**` (transcripts in `agent-transcripts/*/*.jsonl`, `node_modules` excluded)
+- Settings: `~/.config/Cursor/User/settings.json`
+- macOS: set `CURSOR_USER_DIR="$HOME/Library/Application Support/Cursor/User"` in config
 
 ## Adding New Tools
 

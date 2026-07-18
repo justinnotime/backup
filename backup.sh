@@ -21,11 +21,15 @@ BACKUP_ROOT="${BACKUP_ROOT:-$SYNCTHING_ROOT/backup/$MACHINE_ID}"
 OPENCLAW_BACKUP_DIR="${OPENCLAW_BACKUP_DIR:-$BACKUP_ROOT/openclaw}"
 CLAUDE_BACKUP_DIR="${CLAUDE_BACKUP_DIR:-$BACKUP_ROOT/claude}"
 CODEX_BACKUP_DIR="${CODEX_BACKUP_DIR:-$BACKUP_ROOT/codex}"
+CURSOR_BACKUP_DIR="${CURSOR_BACKUP_DIR:-$BACKUP_ROOT/cursor}"
 
 # Source directories
 OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
 CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+CURSOR_HOME="${CURSOR_HOME:-$HOME/.cursor}"
+# Cursor IDE user dir (Linux default; macOS: $HOME/Library/Application Support/Cursor/User)
+CURSOR_USER_DIR="${CURSOR_USER_DIR:-$HOME/.config/Cursor/User}"
 
 # Log
 BACKUP_LOG="${BACKUP_LOG:-$HOME/.local/log/backup.log}"
@@ -205,6 +209,41 @@ backup_codex() {
 }
 
 # ============================================================================
+# Cursor Backup
+# ============================================================================
+backup_cursor() {
+  log "=== Cursor Backup ==="
+
+  # Agent transcripts + per-project session state (terminals, canvases, ...)
+  local projects_src="$CURSOR_HOME/projects"
+  local projects_dst="$CURSOR_BACKUP_DIR/projects"
+  if [ -d "$projects_src" ]; then
+    mkdir -p "$projects_dst"
+    rsync -a --update --exclude="node_modules" "$projects_src/" "$projects_dst/"
+    local count=$(find "$projects_src" -path "*/agent-transcripts/*" -name "*.jsonl" 2>/dev/null | wc -l)
+    log "  Projects: $count transcript files → $projects_dst"
+  else
+    log "  Projects: source not found ($projects_src)"
+  fi
+
+  # Settings
+  local settings_src="$CURSOR_USER_DIR/settings.json"
+  local settings_dst="$CURSOR_BACKUP_DIR/config"
+  if [ -f "$settings_src" ]; then
+    mkdir -p "$settings_dst"
+    rsync -a --update "$settings_src" "$settings_dst/"
+    log "  Settings: settings.json → $settings_dst"
+  fi
+
+  if [ -d "$projects_src" ]; then
+    log "  Cursor backup completed"
+    BACKED_UP_TOOLS+=("Cursor")
+  else
+    log "  Cursor not installed (skipped)"
+  fi
+}
+
+# ============================================================================
 # Main
 # ============================================================================
 main() {
@@ -213,10 +252,12 @@ main() {
   log "  OpenClaw → $OPENCLAW_BACKUP_DIR"
   log "  Claude   → $CLAUDE_BACKUP_DIR"
   log "  Codex    → $CODEX_BACKUP_DIR"
+  log "  Cursor   → $CURSOR_BACKUP_DIR"
   
   backup_openclaw
   backup_claude
   backup_codex
+  backup_cursor
   
   log ""
   if [ ${#BACKED_UP_TOOLS[@]} -eq 0 ]; then
