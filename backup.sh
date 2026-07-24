@@ -27,6 +27,14 @@ CURSOR_BACKUP_DIR="${CURSOR_BACKUP_DIR:-$BACKUP_ROOT/cursor}"
 OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
 CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+
+# Additional profiles (isolated CLAUDE_CONFIG_DIR / CODEX_HOME spaces),
+# space-separated "name:path" entries, e.g.
+#   CLAUDE_PROFILES="work:$HOME/.claude-work personal:$HOME/.claude-personal"
+# Each profile is backed up to ${CLAUDE_BACKUP_DIR}-{name} / ${CODEX_BACKUP_DIR}-{name}.
+# The primary CLAUDE_HOME/CODEX_HOME is always backed up regardless.
+CLAUDE_PROFILES="${CLAUDE_PROFILES:-}"
+CODEX_PROFILES="${CODEX_PROFILES:-}"
 CURSOR_HOME="${CURSOR_HOME:-$HOME/.cursor}"
 # Cursor IDE user dir (Linux default; macOS: $HOME/Library/Application Support/Cursor/User)
 CURSOR_USER_DIR="${CURSOR_USER_DIR:-$HOME/.config/Cursor/User}"
@@ -120,12 +128,13 @@ backup_openclaw() {
 # ============================================================================
 # Claude Code Backup
 # ============================================================================
-backup_claude() {
-  log "=== Claude Code Backup ==="
-  
+backup_claude_dir() {
+  local label="$1" src_home="$2" dst_root="$3"
+  log "=== Claude Code Backup ($label) ==="
+
   # Projects (main backup target)
-  local projects_src="$CLAUDE_HOME/projects"
-  local projects_dst="$CLAUDE_BACKUP_DIR/projects"
+  local projects_src="$src_home/projects"
+  local projects_dst="$dst_root/projects"
   if [ -d "$projects_src" ]; then
     mkdir -p "$projects_dst"
     rsync -a --update "$projects_src/" "$projects_dst/"
@@ -136,8 +145,8 @@ backup_claude() {
   fi
 
   # History
-  local history_src="$CLAUDE_HOME/history.jsonl"
-  local history_dst="$CLAUDE_BACKUP_DIR/history"
+  local history_src="$src_home/history.jsonl"
+  local history_dst="$dst_root/history"
   if [ -f "$history_src" ]; then
     mkdir -p "$history_dst"
     rsync -a --update "$history_src" "$history_dst/"
@@ -148,8 +157,8 @@ backup_claude() {
   fi
 
   # Settings
-  local settings_src="$CLAUDE_HOME/settings.json"
-  local settings_dst="$CLAUDE_BACKUP_DIR/config"
+  local settings_src="$src_home/settings.json"
+  local settings_dst="$dst_root/config"
   if [ -f "$settings_src" ]; then
     mkdir -p "$settings_dst"
     rsync -a --update "$settings_src" "$settings_dst/"
@@ -157,21 +166,37 @@ backup_claude() {
   fi
 
   if [ -d "$projects_src" ]; then
-    log "  Claude Code backup completed"
-    BACKED_UP_TOOLS+=("Claude Code")
+    log "  Claude Code ($label) backup completed"
+    BACKED_UP_TOOLS+=("Claude Code ($label)")
   else
-    log "  Claude Code not installed (skipped)"
+    log "  Claude Code ($label) not installed (skipped)"
   fi
+}
+
+backup_claude() {
+  backup_claude_dir "default" "$CLAUDE_HOME" "$CLAUDE_BACKUP_DIR"
+
+  local entry name path
+  for entry in $CLAUDE_PROFILES; do
+    name="${entry%%:*}"
+    path="${entry#*:}"
+    if [ -z "$name" ] || [ "$name" = "$entry" ]; then
+      log "  ⚠ Skipping malformed CLAUDE_PROFILES entry: '$entry' (expected name:path)"
+      continue
+    fi
+    backup_claude_dir "$name" "$path" "${CLAUDE_BACKUP_DIR}-${name}"
+  done
 }
 
 # ============================================================================
 # Codex Backup
 # ============================================================================
-backup_codex() {
-  log "=== Codex Backup ==="
+backup_codex_dir() {
+  local label="$1" src_home="$2" dst_root="$3"
+  log "=== Codex Backup ($label) ==="
 
-  local sessions_src="$CODEX_HOME/sessions"
-  local sessions_dst="$CODEX_BACKUP_DIR/sessions"
+  local sessions_src="$src_home/sessions"
+  local sessions_dst="$dst_root/sessions"
   if [ -d "$sessions_src" ]; then
     mkdir -p "$sessions_dst"
     rsync -a --update "$sessions_src/" "$sessions_dst/"
@@ -181,8 +206,8 @@ backup_codex() {
     log "  Sessions: source not found ($sessions_src)"
   fi
 
-  local history_src="$CODEX_HOME/history.jsonl"
-  local history_dst="$CODEX_BACKUP_DIR/history"
+  local history_src="$src_home/history.jsonl"
+  local history_dst="$dst_root/history"
   if [ -f "$history_src" ]; then
     mkdir -p "$history_dst"
     rsync -a --update "$history_src" "$history_dst/"
@@ -192,8 +217,8 @@ backup_codex() {
     log "  History: source not found"
   fi
 
-  local config_src="$CODEX_HOME/config.toml"
-  local config_dst="$CODEX_BACKUP_DIR/config"
+  local config_src="$src_home/config.toml"
+  local config_dst="$dst_root/config"
   if [ -f "$config_src" ]; then
     mkdir -p "$config_dst"
     rsync -a --update "$config_src" "$config_dst/"
@@ -201,11 +226,26 @@ backup_codex() {
   fi
 
   if [ -d "$sessions_src" ] || [ -f "$history_src" ]; then
-    log "  Codex backup completed"
-    BACKED_UP_TOOLS+=("Codex")
+    log "  Codex ($label) backup completed"
+    BACKED_UP_TOOLS+=("Codex ($label)")
   else
-    log "  Codex not installed (skipped)"
+    log "  Codex ($label) not installed (skipped)"
   fi
+}
+
+backup_codex() {
+  backup_codex_dir "default" "$CODEX_HOME" "$CODEX_BACKUP_DIR"
+
+  local entry name path
+  for entry in $CODEX_PROFILES; do
+    name="${entry%%:*}"
+    path="${entry#*:}"
+    if [ -z "$name" ] || [ "$name" = "$entry" ]; then
+      log "  ⚠ Skipping malformed CODEX_PROFILES entry: '$entry' (expected name:path)"
+      continue
+    fi
+    backup_codex_dir "$name" "$path" "${CODEX_BACKUP_DIR}-${name}"
+  done
 }
 
 # ============================================================================
@@ -253,6 +293,8 @@ main() {
   log "  Claude   → $CLAUDE_BACKUP_DIR"
   log "  Codex    → $CODEX_BACKUP_DIR"
   log "  Cursor   → $CURSOR_BACKUP_DIR"
+  [ -n "$CLAUDE_PROFILES" ] && log "  Claude profiles: $CLAUDE_PROFILES"
+  [ -n "$CODEX_PROFILES" ]  && log "  Codex profiles:  $CODEX_PROFILES"
   
   backup_openclaw
   backup_claude

@@ -7,8 +7,10 @@ Unified backup solution for OpenClaw, Claude Code, and future AI tools (Codex, C
 ```
 ~/syncthing/backup/{machine-id}/
 ├── openclaw/          # OpenClaw sessions, memory, config
-├── claude/            # Claude Code projects, history
-├── codex/             # Codex sessions, history, config
+├── claude/            # Claude Code projects, history (default profile)
+├── claude-work/       # Claude Code extra profile (optional, see Multiple Profiles)
+├── codex/             # Codex sessions, history, config (default profile)
+├── codex-work/        # Codex extra profile (optional)
 └── cursor/            # Cursor agent transcripts, chat DBs, settings
 ```
 
@@ -112,6 +114,40 @@ tail -f ~/.local/log/backup.log  # View log
 - Agent transcripts + per-project state: `~/.cursor/projects/**` (transcripts in `agent-transcripts/*/*.jsonl`, `node_modules` excluded)
 - Settings: `~/.config/Cursor/User/settings.json`
 - macOS: set `CURSOR_USER_DIR="$HOME/Library/Application Support/Cursor/User"` in config
+
+## Multiple Profiles (work / personal accounts)
+
+Claude Code and Codex both support relocating their entire state directory via an
+environment variable, which gives you fully isolated "spaces" (separate logins,
+settings, history, MCP config) on one machine:
+
+- Claude Code: `CLAUDE_CONFIG_DIR` (default `~/.claude`)
+- Codex: `CODEX_HOME` (default `~/.codex`)
+
+Example shell wrappers:
+
+```bash
+claude-work()     { CLAUDE_CONFIG_DIR="$HOME/.claude-work"     command claude "$@"; }
+claude-personal() { CLAUDE_CONFIG_DIR="$HOME/.claude-personal" command claude "$@"; }
+codex-work()      { CODEX_HOME="$HOME/.codex-work"             command codex "$@"; }
+codex-personal()  { CODEX_HOME="$HOME/.codex-personal"         command codex "$@"; }
+```
+
+To back up these extra profiles, declare them in `~/.config/backup/config` as
+space-separated `name:path` entries:
+
+```bash
+CLAUDE_PROFILES="work:$HOME/.claude-work personal:$HOME/.claude-personal"
+CODEX_PROFILES="work:$HOME/.codex-work personal:$HOME/.codex-personal"
+```
+
+The primary `CLAUDE_HOME` / `CODEX_HOME` is always backed up to `claude/` /
+`codex/` as before; each extra profile goes to its own sibling directory
+(`claude-work/`, `codex-personal/`, ...). Profiles whose directory doesn't
+exist yet are logged and skipped, so it's safe to declare them ahead of time.
+
+Note: credentials (`.credentials.json`, `auth.json`) are intentionally NOT
+backed up — don't sync login tokens through Syncthing.
 
 ## Adding New Tools
 
