@@ -22,19 +22,30 @@ OPENCLAW_BACKUP_DIR="${OPENCLAW_BACKUP_DIR:-$BACKUP_ROOT/openclaw}"
 CLAUDE_BACKUP_DIR="${CLAUDE_BACKUP_DIR:-$BACKUP_ROOT/claude}"
 CODEX_BACKUP_DIR="${CODEX_BACKUP_DIR:-$BACKUP_ROOT/codex}"
 CURSOR_BACKUP_DIR="${CURSOR_BACKUP_DIR:-$BACKUP_ROOT/cursor}"
+OPENCODE_BACKUP_DIR="${OPENCODE_BACKUP_DIR:-$BACKUP_ROOT/opencode}"
 
 # Source directories
 OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
 CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 
+# opencode uses XDG dirs, not a single home (see PROFILES.md)
+OPENCODE_DATA_DIR="${OPENCODE_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/opencode}"
+OPENCODE_CONFIG_SRC="${OPENCODE_CONFIG_SRC:-${XDG_CONFIG_HOME:-$HOME/.config}/opencode}"
+OPENCODE_STATE_DIR="${OPENCODE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/opencode}"
+
 # Additional profiles (isolated CLAUDE_CONFIG_DIR / CODEX_HOME spaces),
 # space-separated "name:path" entries, e.g.
 #   CLAUDE_PROFILES="work:$HOME/.claude-work personal:$HOME/.claude-personal"
 # Each profile is backed up to ${CLAUDE_BACKUP_DIR}-{name} / ${CODEX_BACKUP_DIR}-{name}.
 # The primary CLAUDE_HOME/CODEX_HOME is always backed up regardless.
+# For opencode the path is a profile ROOT containing share/config/state
+# subdirs (the wrapper sets XDG_DATA_HOME=$root/share, XDG_CONFIG_HOME=$root/config,
+# XDG_STATE_HOME=$root/state, so opencode config lives at $root/config/opencode —
+# see PROFILES.md).
 CLAUDE_PROFILES="${CLAUDE_PROFILES:-}"
 CODEX_PROFILES="${CODEX_PROFILES:-}"
+OPENCODE_PROFILES="${OPENCODE_PROFILES:-}"
 CURSOR_HOME="${CURSOR_HOME:-$HOME/.cursor}"
 # Cursor IDE user dir (Linux default; macOS: $HOME/Library/Application Support/Cursor/User)
 CURSOR_USER_DIR="${CURSOR_USER_DIR:-$HOME/.config/Cursor/User}"
@@ -249,6 +260,87 @@ backup_codex() {
 }
 
 # ============================================================================
+# opencode Backup
+# ============================================================================
+backup_opencode_dir() {
+  local label="$1" data_dir="$2" config_dir="$3" state_dir="$4" dst_root="$5"
+  log "=== opencode Backup ($label) ==="
+
+  # Sessions DB (SQLite WAL) — consistent snapshot via sqlite3 .backup
+  local db_dst="$dst_root/db"
+  local db_found=0
+  local db
+  for db in "$data_dir"/*.db; do
+    [ -f "$db" ] || continue
+    db_found=1
+    mkdir -p "$db_dst"
+    if command -v sqlite3 >/dev/null 2>&1; then
+      if sqlite3 "$db" ".backup '$db_dst/$(basename "$db")'"; then
+        log "  DB: $(basename "$db") ($(du -h "$db" | cut -f1)) → $db_dst (sqlite3 .backup)"
+      else
+        log "  ⚠ DB: sqlite3 .backup failed for $db"
+      fi
+    else
+      rsync -a "$db" "$db_dst/"
+      [ -f "${db}-wal" ] && rsync -a "${db}-wal" "${db}-shm" "$db_dst/"
+      log "  DB: $(basename "$db") → $db_dst (rsync; sqlite3 not installed)"
+    fi
+  done
+  [ "$db_found" -eq 1 ] || log "  DB: none found in $data_dir"
+
+  # Legacy JSON session storage (pre-SQLite layouts, still present on old installs)
+  local legacy
+  for legacy in storage project; do
+    if [ -d "$data_dir/$legacy" ]; then
+      mkdir -p "$dst_root/$legacy"
+      rsync -a --update "$data_dir/$legacy/" "$dst_root/$legacy/"
+      log "  Legacy $legacy/: → $dst_root/$legacy"
+    fi
+  done
+
+  # Config (opencode.json, agents/, commands/, themes/; plugin node_modules excluded)
+  if [ -d "$config_dir" ]; then
+    mkdir -p "$dst_root/config"
+    rsync -a --update --exclude="node_modules" "$config_dir/" "$dst_root/config/"
+    log "  Config: $config_dir → $dst_root/config"
+  else
+    log "  Config: source not found ($config_dir)"
+  fi
+
+  # Prompt history
+  local hist="$state_dir/prompt-history.jsonl"
+  if [ -f "$hist" ]; then
+    mkdir -p "$dst_root/history"
+    rsync -a --update "$hist" "$dst_root/history/"
+    log "  History: $(du -h "$hist" | cut -f1) → $dst_root/history/prompt-history.jsonl"
+  fi
+
+  # auth.json / mcp-auth.json intentionally NOT backed up (credentials)
+
+  if [ "$db_found" -eq 1 ] || [ -d "$config_dir" ]; then
+    log "  opencode ($label) backup completed"
+    BACKED_UP_TOOLS+=("opencode ($label)")
+  else
+    log "  opencode ($label) not installed (skipped)"
+  fi
+}
+
+backup_opencode() {
+  backup_opencode_dir "default" "$OPENCODE_DATA_DIR" "$OPENCODE_CONFIG_SRC" "$OPENCODE_STATE_DIR" "$OPENCODE_BACKUP_DIR"
+
+  local entry name root
+  for entry in $OPENCODE_PROFILES; do
+    name="${entry%%:*}"
+    root="${entry#*:}"
+    if [ -z "$name" ] || [ "$name" = "$entry" ]; then
+      log "  ⚠ Skipping malformed OPENCODE_PROFILES entry: '$entry' (expected name:root)"
+      continue
+    fi
+    backup_opencode_dir "$name" "$root/share/opencode" "$root/config/opencode" "$root/state/opencode" "${OPENCODE_BACKUP_DIR}-${name}"
+  done
+}
+
+# ============================================================================
 # Cursor Backup
 # ============================================================================
 backup_cursor() {
@@ -293,12 +385,15 @@ main() {
   log "  Claude   → $CLAUDE_BACKUP_DIR"
   log "  Codex    → $CODEX_BACKUP_DIR"
   log "  Cursor   → $CURSOR_BACKUP_DIR"
-  [ -n "$CLAUDE_PROFILES" ] && log "  Claude profiles: $CLAUDE_PROFILES"
-  [ -n "$CODEX_PROFILES" ]  && log "  Codex profiles:  $CODEX_PROFILES"
+  log "  opencode → $OPENCODE_BACKUP_DIR"
+  [ -n "$CLAUDE_PROFILES" ]   && log "  Claude profiles:   $CLAUDE_PROFILES"
+  [ -n "$CODEX_PROFILES" ]    && log "  Codex profiles:    $CODEX_PROFILES"
+  [ -n "$OPENCODE_PROFILES" ] && log "  opencode profiles: $OPENCODE_PROFILES"
   
   backup_openclaw
   backup_claude
   backup_codex
+  backup_opencode
   backup_cursor
   
   log ""

@@ -11,6 +11,8 @@ Unified backup solution for OpenClaw, Claude Code, and future AI tools (Codex, C
 ├── claude-work/       # Claude Code extra profile (optional, see Multiple Profiles)
 ├── codex/             # Codex sessions, history, config (default profile)
 ├── codex-work/        # Codex extra profile (optional)
+├── opencode/          # opencode sessions DB, config, prompt history (default profile)
+├── opencode-work/     # opencode extra profile (optional)
 └── cursor/            # Cursor agent transcripts, chat DBs, settings
 ```
 
@@ -111,6 +113,13 @@ tail -f ~/.local/log/backup.log  # View log
 - History: `~/.codex/history.jsonl`
 - Config: `~/.codex/config.toml`
 
+### opencode
+- Sessions DB: `~/.local/share/opencode/opencode.db` (SQLite snapshot via `sqlite3 .backup`; falls back to rsync of db+wal+shm)
+- Legacy JSON sessions: `~/.local/share/opencode/{storage,project}/` (pre-SQLite installs)
+- Config: `~/.config/opencode/` (plugin `node_modules` excluded)
+- Prompt history: `~/.local/state/opencode/prompt-history.jsonl`
+- NOT backed up: `auth.json`, `mcp-auth.json` (credentials)
+
 ### Cursor
 - Agent transcripts + per-project state: `~/.cursor/projects/**` (transcripts in `agent-transcripts/*/*.jsonl`, `node_modules` excluded)
 - Settings: `~/.config/Cursor/User/settings.json`
@@ -125,13 +134,15 @@ machine. Declare the extra spaces in `~/.config/backup/config`:
 ```bash
 CLAUDE_PROFILES="work:$HOME/.claude-work personal:$HOME/.claude-personal"
 CODEX_PROFILES="work:$HOME/.codex-work personal:$HOME/.codex-personal"
+OPENCODE_PROFILES="work:$HOME/.opencode-work personal:$HOME/.opencode-personal"
 ```
 
 Each profile is backed up to its own sibling directory (`claude-work/`,
 `codex-personal/`, ...); the primary dir keeps the plain `claude/` / `codex/`
-layout. See **[PROFILES.md](PROFILES.md)** for the full setup guide: shell
-wrappers, new-machine checklist, platform caveats (macOS Keychain), and
-gotchas.
+layout. Note: opencode profile paths are profile *roots* containing
+`share/config/state` subdirs, not the config dir itself. See
+**[PROFILES.md](PROFILES.md)** for the full setup guide: shell wrappers,
+new-machine checklist, platform caveats (macOS Keychain), and gotchas.
 
 ## Adding New Tools
 
