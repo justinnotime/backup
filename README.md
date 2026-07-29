@@ -27,6 +27,7 @@ Unified backup solution for OpenClaw, Claude Code, and future AI tools (Codex, C
 |------|-------------|
 | `backup.sh` | Parameterized incremental backup script |
 | `syncthing-doctor.sh` | Comprehensive Syncthing health check (v2.0) |
+| `clip.sh` | `clip` shell function: remote → local clipboard via OSC 52 / wl-copy |
 | `PROFILES.md` | Multi-profile (work/personal) setup guide for Claude Code & Codex |
 | `~/.config/backup/config` | Per-machine configuration (not in repo) |
 
@@ -147,6 +148,48 @@ new-machine checklist, platform caveats (macOS Keychain), and gotchas.
 ## Adding New Tools
 
 Add new `*_BACKUP_DIR` and `*_HOME` variables in `~/.config/backup/config`, then add a matching `backup_<tool>()` function in `backup.sh` and call it from `main()`.
+
+## clip — remote → local clipboard
+
+`clip.sh` defines a `clip` shell function that sends stdin or a file to the
+**local** clipboard from any machine — same command everywhere:
+
+```bash
+cat /etc/nginx/conf.d/site.conf | clip   # on a remote host
+clip /var/log/foo.log
+echo done | clip                          # locally too
+```
+
+In a local Wayland session it pipes to `wl-copy`; over ssh/mosh it emits an
+OSC 52 escape that the terminal (e.g. kitty) writes to the local clipboard.
+Works over mosh (clipboard is part of mosh's synced terminal state) and
+inside tmux (passthrough-wrapped).
+
+### Install (each machine)
+
+```bash
+ln -sf ~/src/backup/clip.sh ~/.clip.sh    # or copy/rsync to hosts without this repo
+echo '[ -f ~/.clip.sh ] && . ~/.clip.sh' >> ~/.zshrc   # and/or ~/.bashrc
+```
+
+tmux 3.3+ users must allow passthrough — `all`, not `on` (`on` silently drops
+copies fired from panes that are not currently visible, e.g. backgrounded
+jobs or switched-away windows):
+
+```bash
+echo 'set -g allow-passthrough all' >> ~/.tmux.conf
+tmux set -g allow-passthrough all    # apply to a running server
+```
+
+### Notes
+
+- The function clears the clipboard one mosh frame before setting it — mosh
+  only forwards clipboard state on *change*, so without the clear, re-copying
+  identical content is silently dropped.
+- Payloads over ~100 KB print a warning: OSC 52 content participates in
+  mosh state sync; use rsync/scp for big files.
+- The reverse direction needs no tooling: paste locally, or `wl-copy < file`
+  locally then paste into `cat > file` on the remote — keystrokes always flow.
 
 ## License
 
