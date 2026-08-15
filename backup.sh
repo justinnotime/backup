@@ -23,6 +23,7 @@ CLAUDE_BACKUP_DIR="${CLAUDE_BACKUP_DIR:-$BACKUP_ROOT/claude}"
 CODEX_BACKUP_DIR="${CODEX_BACKUP_DIR:-$BACKUP_ROOT/codex}"
 CURSOR_BACKUP_DIR="${CURSOR_BACKUP_DIR:-$BACKUP_ROOT/cursor}"
 OPENCODE_BACKUP_DIR="${OPENCODE_BACKUP_DIR:-$BACKUP_ROOT/opencode}"
+DSH_BACKUP_PREFIX="${DSH_BACKUP_PREFIX:-$BACKUP_ROOT/dsh}"
 
 # Source directories
 OPENCLAW_HOME="${OPENCLAW_HOME:-$HOME/.openclaw}"
@@ -34,7 +35,7 @@ OPENCODE_DATA_DIR="${OPENCODE_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/ope
 OPENCODE_CONFIG_SRC="${OPENCODE_CONFIG_SRC:-${XDG_CONFIG_HOME:-$HOME/.config}/opencode}"
 OPENCODE_STATE_DIR="${OPENCODE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/opencode}"
 
-# Additional profiles (isolated CLAUDE_CONFIG_DIR / CODEX_HOME spaces),
+# Additional profiles (isolated Claude/Codex/OpenCode/DSH spaces),
 # space-separated "name:path" entries, e.g.
 #   CLAUDE_PROFILES="work:$HOME/.claude-work personal:$HOME/.claude-personal"
 # Each profile is backed up to ${CLAUDE_BACKUP_DIR}-{name} / ${CODEX_BACKUP_DIR}-{name}.
@@ -43,9 +44,11 @@ OPENCODE_STATE_DIR="${OPENCODE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/
 # subdirs (the wrapper sets XDG_DATA_HOME=$root/share, XDG_CONFIG_HOME=$root/config,
 # XDG_STATE_HOME=$root/state, so opencode config lives at $root/config/opencode —
 # see PROFILES.md).
+# DSH has no implicit primary backup; every DSH_HOME is an explicit profile.
 CLAUDE_PROFILES="${CLAUDE_PROFILES:-}"
 CODEX_PROFILES="${CODEX_PROFILES:-}"
 OPENCODE_PROFILES="${OPENCODE_PROFILES:-}"
+DSH_PROFILES="${DSH_PROFILES:-}"
 CURSOR_HOME="${CURSOR_HOME:-$HOME/.cursor}"
 # Cursor IDE user dir (Linux default; macOS: $HOME/Library/Application Support/Cursor/User)
 CURSOR_USER_DIR="${CURSOR_USER_DIR:-$HOME/.config/Cursor/User}"
@@ -61,6 +64,7 @@ log() {
 
 # Track what was backed up
 BACKED_UP_TOOLS=()
+BACKUP_FAILURES=0
 
 # ============================================================================
 # OpenClaw Backup
@@ -341,6 +345,130 @@ backup_opencode() {
 }
 
 # ============================================================================
+# DeepSeek Harness Backup
+# ============================================================================
+backup_dsh_dir() {
+  local label="$1" src_home="$2" dst_root="$3"
+  log "=== DeepSeek Harness Backup ($label) ==="
+
+  if [[ ! "$label" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+    log "  Skipping unsafe DSH profile label: '$label'"
+    BACKUP_FAILURES=$((BACKUP_FAILURES + 1))
+    return
+  fi
+  if [ ! -d "$src_home" ]; then
+    log "  DeepSeek Harness ($label) not installed (source not found: $src_home)"
+    return
+  fi
+
+  local expected_name=".dsh-${label}"
+  local source_name="${src_home%/}"
+  source_name="${source_name##*/}"
+  mkdir -p "$BACKUP_ROOT" "${dst_root%/*}"
+  local src_real backup_real dst_real home_real
+  src_real=$(cd -P "$src_home" && pwd -P)
+  backup_real=$(cd -P "$BACKUP_ROOT" && pwd -P)
+  if [ -L "$dst_root" ]; then
+    log "  Skipping symlinked DSH backup destination"
+    BACKUP_FAILURES=$((BACKUP_FAILURES + 1))
+    return
+  elif [ -d "$dst_root" ]; then
+    dst_real=$(cd -P "$dst_root" && pwd -P)
+  else
+    dst_real=$(cd -P "${dst_root%/*}" && pwd -P)/${dst_root##*/}
+  fi
+  home_real=$(cd -P "$HOME" && pwd -P)
+  if [ "$source_name" != "$expected_name" ] || [ "${src_real##*/}" != "$expected_name" ]; then
+    log "  Skipping DSH profile whose source is not an exact $expected_name directory"
+    BACKUP_FAILURES=$((BACKUP_FAILURES + 1))
+    return
+  fi
+  if [ "$src_real" = "/" ] || [ "$src_real" = "$home_real" ]; then
+    log "  Skipping unsafe DSH profile source"
+    BACKUP_FAILURES=$((BACKUP_FAILURES + 1))
+    return
+  fi
+  case "$src_real/" in
+    "$backup_real/"*|"$dst_real/"*)
+      log "  Skipping DSH profile nested inside its backup destination"
+      BACKUP_FAILURES=$((BACKUP_FAILURES + 1))
+      return
+      ;;
+  esac
+  case "$backup_real/" in
+    "$src_real/"*)
+      log "  Skipping DSH profile that contains the backup tree"
+      BACKUP_FAILURES=$((BACKUP_FAILURES + 1))
+      return
+      ;;
+  esac
+  case "$dst_real/" in
+    "$src_real/"*)
+      log "  Skipping DSH profile that contains its destination"
+      BACKUP_FAILURES=$((BACKUP_FAILURES + 1))
+      return
+      ;;
+  esac
+
+  mkdir -p "$dst_root"
+  local rsync_status=0
+  rsync -a --update \
+    --exclude='.credentials.yaml*' \
+    --exclude='.env*' \
+    --exclude='.anonymous-user-id' \
+    --exclude='node_modules/' \
+    --exclude='/profiles/*/cordis.yml' \
+    "$src_real/" "$dst_root/" || rsync_status=$?
+  if [ "$rsync_status" -ne 0 ] && [ "$rsync_status" -ne 24 ]; then
+    log "  DSH backup failed (rsync status $rsync_status)"
+    BACKUP_FAILURES=$((BACKUP_FAILURES + 1))
+    return
+  fi
+  if [ "$rsync_status" -eq 24 ]; then
+    log "  DSH state changed during backup; copied stable files and will retry next run"
+  fi
+  local size
+  if ! size=$(du -sh "$src_real" 2>/dev/null | cut -f1); then
+    size="unknown size"
+  fi
+  log "  State: $size -> $dst_root"
+  log "  Credentials, environment files, telemetry identity, and generated dependencies excluded"
+  BACKED_UP_TOOLS+=("DeepSeek Harness ($label)")
+}
+
+backup_dsh() {
+  local entry name path
+  local seen_labels=""
+  while IFS= read -r entry; do
+    [ -n "$entry" ] || continue
+    name="${entry%%:*}"
+    path="${entry#*:}"
+    if [ -z "$name" ] || [ "$name" = "$entry" ] || [ -z "$path" ]; then
+      log "  Skipping malformed DSH_PROFILES entry: '$entry' (expected name:path)"
+      BACKUP_FAILURES=$((BACKUP_FAILURES + 1))
+      continue
+    fi
+    if [[ "$path" != /* ]]; then
+      log "  Skipping non-absolute DSH profile path: '$path'"
+      BACKUP_FAILURES=$((BACKUP_FAILURES + 1))
+      continue
+    fi
+    if [[ ! "$name" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+      log "  Skipping unsafe DSH profile label: '$name'"
+      BACKUP_FAILURES=$((BACKUP_FAILURES + 1))
+      continue
+    fi
+    if [[ $'\n'${seen_labels}$'\n' == *$'\n'"$name"$'\n'* ]]; then
+      log "  Skipping duplicate DSH profile label: '$name'"
+      BACKUP_FAILURES=$((BACKUP_FAILURES + 1))
+      continue
+    fi
+    seen_labels="${seen_labels}${seen_labels:+$'\n'}${name}"
+    backup_dsh_dir "$name" "$path" "${DSH_BACKUP_PREFIX}-${name}"
+  done <<< "$DSH_PROFILES"
+}
+
+# ============================================================================
 # Cursor Backup
 # ============================================================================
 backup_cursor() {
@@ -389,15 +517,20 @@ main() {
   [ -n "$CLAUDE_PROFILES" ]   && log "  Claude profiles:   $CLAUDE_PROFILES"
   [ -n "$CODEX_PROFILES" ]    && log "  Codex profiles:    $CODEX_PROFILES"
   [ -n "$OPENCODE_PROFILES" ] && log "  opencode profiles: $OPENCODE_PROFILES"
+  [ -n "$DSH_PROFILES" ]      && log "  DSH profiles configured"
   
   backup_openclaw
   backup_claude
   backup_codex
   backup_opencode
+  backup_dsh
   backup_cursor
   
   log ""
-  if [ ${#BACKED_UP_TOOLS[@]} -eq 0 ]; then
+  if [ "$BACKUP_FAILURES" -ne 0 ]; then
+    log "Backup incomplete: $BACKUP_FAILURES configured target(s) failed"
+    exit 1
+  elif [ ${#BACKED_UP_TOOLS[@]} -eq 0 ]; then
     log "⚠ No tools found to backup"
     exit 1
   else

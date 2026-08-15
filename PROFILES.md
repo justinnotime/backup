@@ -1,24 +1,23 @@
-# Multi-Profile Setup for Claude Code, Codex & opencode
+# Multi-Profile Setup for Claude Code, Codex, opencode & DSH
 
 How to run separate work/personal "spaces" (isolated accounts, settings,
-history, MCP config) for Claude Code, Codex, and opencode on one machine, and
-have this backup system pick them all up. Reference this doc when setting up
-a new machine.
+history, MCP config) for Claude Code, Codex, opencode, and DSH on one machine,
+and have this backup system pick them all up. Reference this doc when setting
+up a new machine.
 
 ## How it works
 
-Both tools support relocating their entire user-level state directory via an
-environment variable:
+Claude Code, Codex, and DSH relocate their entire user-level state directory
+through an environment variable:
 
 | Tool | Env var | Default | Isolates |
 |------|---------|---------|----------|
 | Claude Code | `CLAUDE_CONFIG_DIR` | `~/.claude` | login credentials¹, settings, history, projects, plugins, user-level MCP config |
 | Codex | `CODEX_HOME` | `~/.codex` | `auth.json`, `config.toml`, sessions, history |
+| DeepSeek Harness | `DSH_HOME` | `~/.dsh` | credentials, settings, sessions, attachments, storages, profiles |
 
 Point the variable at a different directory and you get a fully independent
-space. The plain `claude` / `codex` command (no variable set) keeps using the
-default directory — that's the "default profile", i.e. whatever account you
-were already logged into.
+space. A process with no variable set keeps using the tool's default directory.
 
 ¹ Platform caveat: on **Linux/Windows** credentials live in a file inside the
 config dir (`.credentials.json`), so isolation includes login state. On
@@ -72,9 +71,17 @@ done
 (Re-run the loop if a newly installed tool's `~/.config/<tool>` needs to be
 visible inside profile sessions.)
 
+### DSH uses one home per instance
+
+Each long-lived DSH Web process needs a distinct `DSH_HOME` and listening port.
+The `profiles/` directory inside a DSH home selects agent compositions; it is
+not an account or transcript isolation boundary. Use separate top-level homes,
+such as `~/.dsh-personal` and `~/.dsh-work`.
+
 ## New machine checklist
 
-1. **Shell wrappers** — add to `~/.zshrc` / `~/.bashrc`:
+1. **Shell wrappers and services** — add the CLI wrappers to `~/.zshrc` /
+   `~/.bashrc`:
 
    ```bash
    # --- AI tool profiles: isolated work/personal spaces ---
@@ -99,9 +106,12 @@ visible inside profile sessions.)
    drop a minimal `$p/config/opencode/opencode.json`
    (`{"$schema": "https://opencode.ai/config.json"}`) into each profile.
 
-   If the existing default profile already serves as one of the roles (e.g.
-   it's your personal account), skip that wrapper — you only need dirs for
-   the *additional* accounts.
+   For DSH Web, create one service per role with a unique `DSH_HOME` and port;
+   do not globally export `DSH_HOME`.
+
+   If an existing Claude/Codex/opencode default profile already serves as one
+   of the roles, skip that wrapper. DSH backup intentionally requires named
+   `.dsh-<role>` homes; migrate a default `~/.dsh` home before listing it.
 
    For a one-off run without wrappers: `CLAUDE_CONFIG_DIR=~/.claude-work claude`.
    Don't globally `export` these variables — that would lock every shell to
@@ -109,25 +119,35 @@ visible inside profile sessions.)
 
 2. **First login** — run each wrapper once and log in to the matching
    account (`/login` in Claude Code, `codex login` for Codex,
-   `opencode auth login` for opencode). The directory is created
-   automatically; each space remembers its own login afterwards.
+   `opencode auth login` for opencode). Start each DSH instance and configure
+   its matching provider credentials separately. Each space remembers its own
+   login afterwards.
 
 3. **Backup config** — declare the extra profiles in
-   `~/.config/backup/config` as space-separated `name:path` entries:
+   `~/.config/backup/config` as `name:path` entries. DSH entries are
+   newline-separated so their paths may contain spaces:
 
    ```bash
    CLAUDE_PROFILES="work:$HOME/.claude-work personal:$HOME/.claude-personal"
    CODEX_PROFILES="work:$HOME/.codex-work personal:$HOME/.codex-personal"
    OPENCODE_PROFILES="work:$HOME/.opencode-work personal:$HOME/.opencode-personal"
+   DSH_PROFILES="personal:$HOME/.dsh-personal
+   work:$HOME/.dsh-work"
    ```
 
-   For Claude/Codex the path is the config dir itself; for opencode it is
+   For Claude/Codex/DSH the path is the profile root itself; for opencode it is
    the profile *root* (the backup script derives `share/opencode`,
    `config/opencode`, and `state/opencode` under it, matching the wrapper's
    env vars).
 
-   Profiles whose directory doesn't exist (or has no data yet) are logged and
-   skipped, so it's safe to declare them before first use.
+   DSH labels must begin with a lowercase letter or digit and may then use
+   lowercase letters, digits, underscores, or hyphens. Each source directory
+   must be named exactly `.dsh-<label>`; duplicate labels are skipped rather
+   than merged. Paths may contain spaces but must be absolute.
+
+   Profiles whose directory doesn't exist are logged and skipped, so it's safe
+   to declare them before first use. An existing empty DSH root is backed up as
+   an empty profile.
 
 4. **Verify** — run `~/bin/backup` and check the log: each profile gets its
    own sibling backup dir under `~/syncthing/backup/{machine-id}/`:
@@ -142,6 +162,8 @@ visible inside profile sessions.)
    opencode/
    opencode-work/
    opencode-personal/
+   dsh-work/
+   dsh-personal/
    ```
 
    The Syncthing `.stignore` pattern (`!{machine-id}/**`) already covers
@@ -149,9 +171,14 @@ visible inside profile sessions.)
 
 ## Gotchas
 
-- **Credentials are never backed up** (`.credentials.json`, `auth.json`,
-  `mcp-auth.json`) — by design; don't sync login tokens through Syncthing.
-  Re-login on restore.
+- **Known credential stores are excluded** (`.credentials.json`, `auth.json`,
+  `mcp-auth.json`, DSH `.credentials.yaml` and `.env*`). Re-login on restore.
+  A custom DSH credential filename or a secret manually embedded in settings
+  or transcripts cannot be identified by filename and remains the operator's
+  responsibility.
+- **Profile suffixes are not a trust boundary.** `dsh-personal/` and
+  `dsh-work/` are siblings in the same Syncthing machine tree. Every receiver
+  of that shared backup folder may receive both profiles.
 - **opencode env vars are read at process startup** — the wrapper approach
   works, but you can't switch profiles mid-session, and IDE/desktop
   integrations that spawn opencode won't inherit shell functions; set the
@@ -176,5 +203,4 @@ visible inside profile sessions.)
   copy of this file the session is using.
 - **macOS Cursor path** differs (`~/Library/Application Support/Cursor/User`)
   — set `CURSOR_USER_DIR` in the backup config. Cursor itself has no
-  equivalent profile env var; multi-profile here covers Claude Code, Codex,
-  and opencode only.
+  equivalent profile env var.

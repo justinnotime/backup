@@ -13,6 +13,8 @@ Unified backup solution for OpenClaw, Claude Code, and future AI tools (Codex, C
 ├── codex-work/        # Codex extra profile (optional)
 ├── opencode/          # opencode sessions DB, config, prompt history (default profile)
 ├── opencode-work/     # opencode extra profile (optional)
+├── dsh-personal/      # DeepSeek Harness personal profile (optional)
+├── dsh-work/          # DeepSeek Harness work profile (optional)
 └── cursor/            # Cursor agent transcripts, chat DBs, settings
 ```
 
@@ -28,7 +30,7 @@ Unified backup solution for OpenClaw, Claude Code, and future AI tools (Codex, C
 | `backup.sh` | Parameterized incremental backup script |
 | `syncthing-doctor.sh` | Comprehensive Syncthing health check (v2.0) |
 | `clip.sh` | `clip` shell function: remote → local clipboard via OSC 52 / wl-copy |
-| `PROFILES.md` | Multi-profile (work/personal) setup guide for Claude Code & Codex |
+| `PROFILES.md` | Multi-profile (work/personal) setup guide |
 | `~/.config/backup/config` | Per-machine configuration (not in repo) |
 
 ## Quick Start
@@ -121,6 +123,11 @@ tail -f ~/.local/log/backup.log  # View log
 - Prompt history: `~/.local/state/opencode/prompt-history.jsonl`
 - NOT backed up: `auth.json`, `mcp-auth.json` (credentials)
 
+### DeepSeek Harness
+- Complete explicitly listed `DSH_HOME` roots
+- Sessions, attachments, storages, settings, skills, and profile manifests
+- NOT backed up: canonical credentials, `.env*`, telemetry identity, dependency trees
+
 ### Cursor
 - Agent transcripts + per-project state: `~/.cursor/projects/**` (transcripts in `agent-transcripts/*/*.jsonl`, `node_modules` excluded)
 - Settings: `~/.config/Cursor/User/settings.json`
@@ -128,22 +135,59 @@ tail -f ~/.local/log/backup.log  # View log
 
 ## Multiple Profiles (work / personal accounts)
 
-Claude Code (`CLAUDE_CONFIG_DIR`) and Codex (`CODEX_HOME`) support fully
-isolated "spaces" — separate logins, settings, history, MCP config — on one
-machine. Declare the extra spaces in `~/.config/backup/config`:
+Claude Code (`CLAUDE_CONFIG_DIR`), Codex (`CODEX_HOME`), opencode (XDG roots),
+and DSH (`DSH_HOME`) support isolated spaces on one machine. Declare them in
+`~/.config/backup/config`:
 
 ```bash
 CLAUDE_PROFILES="work:$HOME/.claude-work personal:$HOME/.claude-personal"
 CODEX_PROFILES="work:$HOME/.codex-work personal:$HOME/.codex-personal"
 OPENCODE_PROFILES="work:$HOME/.opencode-work personal:$HOME/.opencode-personal"
+DSH_PROFILES="personal:$HOME/.dsh-personal
+work:$HOME/.dsh-work"
 ```
 
 Each profile is backed up to its own sibling directory (`claude-work/`,
-`codex-personal/`, ...); the primary dir keeps the plain `claude/` / `codex/`
-layout. Note: opencode profile paths are profile *roots* containing
+`codex-personal/`, `dsh-work/`, ...); the primary dir keeps the plain `claude/`
+/ `codex/` layout. DSH has no implicit primary profile: every `DSH_HOME` must be
+listed explicitly. Note: opencode profile paths are profile *roots* containing
 `share/config/state` subdirs, not the config dir itself. See
 **[PROFILES.md](PROFILES.md)** for the full setup guide: shell wrappers,
 new-machine checklist, platform caveats (macOS Keychain), and gotchas.
+
+## DeepSeek Harness
+
+Declare each complete `DSH_HOME` explicitly:
+
+```bash
+DSH_PROFILES="personal:$HOME/.dsh-personal
+work:$HOME/.dsh-work"
+```
+
+Entries are newline-separated. Labels begin with a lowercase letter or digit
+and may then contain lowercase letters, digits, underscores, or hyphens. Each
+source directory must be named exactly `.dsh-<label>`. Paths may contain spaces
+but must be absolute.
+
+The backup includes sessions, attachments, storages, settings, skills, and
+profile manifests. New copies exclude the canonical `.credentials.yaml` and
+its temporary files, `.env*`,
+`.anonymous-user-id`, every `node_modules/`, and generated profile `cordis.yml`
+files. Reinstall dependencies and re-enter credentials after restoring into an
+empty, stopped DSH home.
+
+Custom credential-provider filenames and secrets manually embedded in settings
+or transcripts cannot be identified safely by filename. Review those configs
+before enabling Syncthing; the exclusion guarantee covers the canonical DSH
+credential store, not arbitrary plugin data.
+
+The incremental backup does not delete old destination files. If a destination
+predates these exclusions, inspect and clean it locally before enabling sync.
+
+Each label uses `${DSH_BACKUP_PREFIX}-<label>` under the existing machine backup
+tree, producing sibling directories such as `dsh-personal/` and `dsh-work/`.
+These suffixes isolate backup layout, not access: every receiver of the shared
+Syncthing backup folder can receive both profiles.
 
 ## Adding New Tools
 
