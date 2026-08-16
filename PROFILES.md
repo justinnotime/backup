@@ -172,7 +172,8 @@ such as `~/.dsh-personal` and `~/.dsh-work`.
 ## Gotchas
 
 - **Known credential stores are excluded** (`.credentials.json`, `auth.json`,
-  `mcp-auth.json`, DSH `.credentials.yaml` and `.env*`). Re-login on restore.
+  `mcp-auth.json`, DSH `.credentials.yaml`, `.oauth/`, and `.env*`). Re-login
+  on restore.
   A custom DSH credential filename or a secret manually embedded in settings
   or transcripts cannot be identified by filename and remains the operator's
   responsibility.

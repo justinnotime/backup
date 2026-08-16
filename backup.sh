@@ -414,6 +414,7 @@ backup_dsh_dir() {
   local rsync_status=0
   rsync -a --update \
     --exclude='.credentials.yaml*' \
+    --exclude='.oauth/' \
     --exclude='.env*' \
     --exclude='.anonymous-user-id' \
     --exclude='node_modules/' \
@@ -432,7 +433,7 @@ backup_dsh_dir() {
     size="unknown size"
   fi
   log "  State: $size -> $dst_root"
-  log "  Credentials, environment files, telemetry identity, and generated dependencies excluded"
+  log "  Credentials, OAuth state, environment files, telemetry identity, and generated dependencies excluded"
   BACKED_UP_TOOLS+=("DeepSeek Harness ($label)")
 }
 

@@ -126,7 +126,7 @@ tail -f ~/.local/log/backup.log  # View log
 ### DeepSeek Harness
 - Complete explicitly listed `DSH_HOME` roots
 - Sessions, attachments, storages, settings, skills, and profile manifests
-- NOT backed up: canonical credentials, `.env*`, telemetry identity, dependency trees
+- NOT backed up: canonical credentials, `.oauth/`, `.env*`, telemetry identity, dependency trees
 
 ### Cursor
 - Agent transcripts + per-project state: `~/.cursor/projects/**` (transcripts in `agent-transcripts/*/*.jsonl`, `node_modules` excluded)
@@ -171,7 +171,7 @@ but must be absolute.
 
 The backup includes sessions, attachments, storages, settings, skills, and
 profile manifests. New copies exclude the canonical `.credentials.yaml` and
-its temporary files, `.env*`,
+its temporary files, `.oauth/`, `.env*`,
 `.anonymous-user-id`, every `node_modules/`, and generated profile `cordis.yml`
 files. Reinstall dependencies and re-enter credentials after restoring into an
 empty, stopped DSH home.
