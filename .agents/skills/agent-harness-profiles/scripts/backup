@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../../../.." && pwd -P)"
+
+if [[ ! -x "${REPO_ROOT}/backup.sh" ]]; then
+  printf 'backup entrypoint is missing or not executable: %s\n' "${REPO_ROOT}/backup.sh" >&2
+  exit 1
+fi
+
+exec "${REPO_ROOT}/backup.sh" "$@"

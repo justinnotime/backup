@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Harness Profiles"
+  short_description: "Provision isolated harness roots and compatible backups"
+  default_prompt: "Use $agent-harness-profiles to inspect or reproduce this machine’s isolated agent harness roots and backups."

@@ -1,207 +1,153 @@
-# Multi-Profile Setup for Claude Code, Codex, opencode & DSH
+# Multiple Source Roots
 
-How to run separate work/personal "spaces" (isolated accounts, settings,
-history, MCP config) for Claude Code, Codex, opencode, and DSH on one machine,
-and have this backup system pick them all up. Reference this doc when setting
-up a new machine.
+`backup.sh` can back up the native default state directory for each supported
+tool and any number of additional state roots. Labels are opaque destination
+names; the backup system does not create accounts, launch applications, or
+assign meaning to a label.
 
-## How it works
+This filename is retained for compatibility with existing links.
 
-Claude Code, Codex, and DSH relocate their entire user-level state directory
-through an environment variable:
+## Default behavior
 
-| Tool | Env var | Default | Isolates |
-|------|---------|---------|----------|
-| Claude Code | `CLAUDE_CONFIG_DIR` | `~/.claude` | login credentials¹, settings, history, projects, plugins, user-level MCP config |
-| Codex | `CODEX_HOME` | `~/.codex` | `auth.json`, `config.toml`, sessions, history |
-| DeepSeek Harness | `DSH_HOME` | `~/.dsh` | credentials, settings, sessions, attachments, storages, profiles |
+With no per-machine config, the script discovers the tools' native locations:
 
-Point the variable at a different directory and you get a fully independent
-space. A process with no variable set keeps using the tool's default directory.
+| Tool | Default source |
+|------|----------------|
+| Claude Code | `~/.claude` |
+| Codex | `~/.codex` |
+| opencode | XDG `data/config/state` directories |
+| DeepSeek Harness | `~/.dsh` |
+| OpenClaw | `~/.openclaw` |
+| Cursor | `~/.cursor` plus its platform user-config directory |
 
-¹ Platform caveat: on **Linux/Windows** credentials live in a file inside the
-config dir (`.credentials.json`), so isolation includes login state. On
-**macOS** Claude Code stores credentials in the system Keychain, which is
-shared — `CLAUDE_CONFIG_DIR` still isolates settings/history, but login state
-may be shared across profiles.
+Missing sources are logged and skipped. A machine that uses only native
+defaults needs no multi-source configuration.
 
-Note: project-level config (`.claude/settings.json`, `CLAUDE.md`, `AGENTS.md`
-inside a repo) follows the repo, not the profile — it applies in every space.
+## Source layouts
 
-### opencode is different: no single home dir
+Additional roots must use the layout produced by the upstream tool:
 
-opencode follows the XDG spec and has **no single env var that relocates all
-state**. Its state is spread across four dirs, each governed separately:
+| Tool | Root contract |
+|------|---------------|
+| Claude Code | directory selected by `CLAUDE_CONFIG_DIR` |
+| Codex | directory selected by `CODEX_HOME` |
+| opencode | a root containing `share/opencode`, `config/opencode`, and `state/opencode` |
+| DeepSeek Harness | directory selected by `DSH_HOME` |
 
-| What | Default | Env var |
-|------|---------|---------|
-| Config (`opencode.json`, agents/, plugins/) | `~/.config/opencode` | `XDG_CONFIG_HOME` (see warning below) |
-| Data: **auth.json**, sessions DB (`opencode.db`), logs | `~/.local/share/opencode` | `XDG_DATA_HOME` only |
-| State: lock files, prompt history | `~/.local/state/opencode` | `XDG_STATE_HOME` |
-| Cache: downloaded provider packages | `~/.cache/opencode` | `XDG_CACHE_HOME` |
+The backup contract begins once a source directory exists. The repository's
+`agent-harness-profiles` skill can generate shell launchers and prepare OpenCode
+roots, while application-specific services remain owned by their deployment
+repositories.
 
-⚠️ **`OPENCODE_CONFIG_DIR` / `OPENCODE_CONFIG` do NOT isolate config** —
-they are *additive layers*: opencode still merges the global
-`~/.config/opencode/opencode.json` underneath (verified empirically on
-v1.18.0 with `opencode models`). Anything defined globally — e.g. an LLM
-provider with an inline API key — remains visible and usable in every
-profile. Only `XDG_CONFIG_HOME` truly relocates the global config.
+For the full setup workflow, read
+`.agents/skills/agent-harness-profiles/SKILL.md`. This page remains focused on
+the backup interface so the two documents do not drift into copies.
 
-So an opencode profile is a *root directory* plus three XDG env vars (set
-per-invocation by the wrapper below). Cache is deliberately left shared —
-it holds no account state, and separate caches would re-download provider
-binaries per profile. Native multi-account support is an open opencode
-feature request; the XDG approach is what community profile tools use today.
+## Per-machine configuration
 
-Because `XDG_CONFIG_HOME` also redirects config lookups for subprocesses
-spawned inside opencode sessions (git, gh, ...), symlink the other entries
-of `~/.config` into the profile's config dir once at setup:
+Configuration lives at `~/.config/backup/config` and is sourced as shell data.
+Existing variable names and formats are stable compatibility interfaces.
+
+Claude Code, Codex, and opencode use space-separated `label:path` entries:
 
 ```bash
-for p in ~/.opencode-work ~/.opencode-personal; do
-  mkdir -p "$p/config/opencode"
-  for d in ~/.config/*; do
-    base=$(basename "$d")
-    [ "$base" = "opencode" ] && continue
-    ln -sfn "$d" "$p/config/$base"
-  done
-done
+CLAUDE_PROFILES="alternate:$HOME/.claude-alt lab:$HOME/.claude-lab"
+CODEX_PROFILES="alternate:$HOME/.codex-alt"
+OPENCODE_PROFILES="lab:$HOME/.opencode-lab"
 ```
 
-(Re-run the loop if a newly installed tool's `~/.config/<tool>` needs to be
-visible inside profile sessions.)
+These three legacy list formats do not support whitespace inside a path.
+Labels should contain lowercase letters, digits, underscores, or hyphens.
 
-### DSH uses one home per instance
+DeepSeek Harness uses newline-separated entries, so its paths may contain
+spaces:
 
-Each long-lived DSH Web process needs a distinct `DSH_HOME` and listening port.
-The `profiles/` directory inside a DSH home selects agent compositions; it is
-not an account or transcript isolation boundary. Use separate top-level homes,
-such as `~/.dsh-personal` and `~/.dsh-work`.
+```bash
+DSH_PROFILES="alternate:$HOME/.dsh-alt
+lab:$HOME/.dsh-lab"
+```
 
-## New machine checklist
+DSH labels must begin with a lowercase letter or digit and may then contain
+lowercase letters, digits, underscores, or hyphens. Paths must be absolute.
+The source directory name does not need to match its label.
 
-1. **Shell wrappers and services** — add the CLI wrappers to `~/.zshrc` /
-   `~/.bashrc`:
+## DeepSeek Harness default compatibility
 
-   ```bash
-   # --- AI tool profiles: isolated work/personal spaces ---
-   claude-work()     { CLAUDE_CONFIG_DIR="$HOME/.claude-work"     command claude "$@"; }
-   claude-personal() { CLAUDE_CONFIG_DIR="$HOME/.claude-personal" command claude "$@"; }
-   codex-work()      { CODEX_HOME="$HOME/.codex-work"             command codex "$@"; }
-   codex-personal()  { CODEX_HOME="$HOME/.codex-personal"         command codex "$@"; }
+`DSH_INCLUDE_DEFAULT` controls the native `DSH_HOME` source:
 
-   # opencode: profile root + three XDG env vars (see "opencode is different" above;
-   # OPENCODE_CONFIG_DIR would NOT isolate — the global config gets merged in)
-   opencode-work() {
-     local p="$HOME/.opencode-work"
-     XDG_DATA_HOME="$p/share" XDG_STATE_HOME="$p/state" XDG_CONFIG_HOME="$p/config" command opencode "$@"
-   }
-   opencode-personal() {
-     local p="$HOME/.opencode-personal"
-     XDG_DATA_HOME="$p/share" XDG_STATE_HOME="$p/state" XDG_CONFIG_HOME="$p/config" command opencode "$@"
-   }
-   ```
+| Value | Behavior |
+|-------|----------|
+| `auto` (default) | Back up `DSH_HOME` only when `DSH_PROFILES` is empty |
+| `true`, `yes`, or `1` | Back up `DSH_HOME` in addition to configured roots |
+| `false`, `no`, or `0` | Do not back up `DSH_HOME` |
 
-   For opencode, also run the config-symlink loop from the section above and
-   drop a minimal `$p/config/opencode/opencode.json`
-   (`{"$schema": "https://opencode.ai/config.json"}`) into each profile.
+The `auto` rule preserves older multi-root deployments: a machine that already
+sets `DSH_PROFILES` continues to back up only those explicit entries after an
+upgrade. A new single-root installation gets the upstream `~/.dsh` default
+without extra configuration.
 
-   For DSH Web, create one service per role with a unique `DSH_HOME` and port;
-   do not globally export `DSH_HOME`.
+Override the source or destination when necessary:
 
-   If an existing Claude/Codex/opencode default profile already serves as one
-   of the roles, skip that wrapper. DSH backup intentionally requires named
-   `.dsh-<role>` homes; migrate a default `~/.dsh` home before listing it.
+```bash
+DSH_HOME="/absolute/path/to/dsh-state"
+DSH_BACKUP_DIR="$BACKUP_ROOT/dsh"
+DSH_BACKUP_PREFIX="$BACKUP_ROOT/dsh"
+```
 
-   For a one-off run without wrappers: `CLAUDE_CONFIG_DIR=~/.claude-work claude`.
-   Don't globally `export` these variables — that would lock every shell to
-   one space.
+## Destination layout
 
-2. **First login** — run each wrapper once and log in to the matching
-   account (`/login` in Claude Code, `codex login` for Codex,
-   `opencode auth login` for opencode). Start each DSH instance and configure
-   its matching provider credentials separately. Each space remembers its own
-   login afterwards.
+Default sources keep the unsuffixed destination. Additional labels append a
+suffix:
 
-3. **Backup config** — declare the extra profiles in
-   `~/.config/backup/config` as `name:path` entries. DSH entries are
-   newline-separated so their paths may contain spaces:
+```text
+backup/<machine>/
+  claude/
+  claude-alternate/
+  codex/
+  codex-alternate/
+  opencode/
+  opencode-lab/
+  dsh/
+  dsh-alternate/
+```
 
-   ```bash
-   CLAUDE_PROFILES="work:$HOME/.claude-work personal:$HOME/.claude-personal"
-   CODEX_PROFILES="work:$HOME/.codex-work personal:$HOME/.codex-personal"
-   OPENCODE_PROFILES="work:$HOME/.opencode-work personal:$HOME/.opencode-personal"
-   DSH_PROFILES="personal:$HOME/.dsh-personal
-   work:$HOME/.dsh-work"
-   ```
+All of these directories remain inside the same configured backup tree. A
+suffix is organization, not an access-control boundary.
 
-   For Claude/Codex/DSH the path is the profile root itself; for opencode it is
-   the profile *root* (the backup script derives `share/opencode`,
-   `config/opencode`, and `state/opencode` under it, matching the wrapper's
-   env vars).
+## Credential handling
 
-   DSH labels must begin with a lowercase letter or digit and may then use
-   lowercase letters, digits, underscores, or hyphens. Each source directory
-   must be named exactly `.dsh-<label>`; duplicate labels are skipped rather
-   than merged. Paths may contain spaces but must be absolute.
+Known credential stores are intentionally excluded:
 
-   Profiles whose directory doesn't exist are logged and skipped, so it's safe
-   to declare them before first use. An existing empty DSH root is backed up as
-   an empty profile.
+- Claude Code credential files;
+- Codex `auth.json`;
+- opencode `auth.json` and `mcp-auth.json`;
+- DSH `.credentials.yaml*`, `.oauth/`, and `.env*`;
+- generated dependency trees and telemetry identity files.
 
-4. **Verify** — run `~/bin/backup` and check the log: each profile gets its
-   own sibling backup dir under `~/syncthing/backup/{machine-id}/`:
+Re-authenticate after restoring onto another host. Secrets embedded in custom
+filenames, settings, or transcripts cannot be detected reliably by a generic
+backup tool and remain the operator's responsibility.
 
-   ```
-   claude/            # default profile (unchanged layout)
-   claude-work/
-   claude-personal/
-   codex/
-   codex-work/
-   codex-personal/
-   opencode/
-   opencode-work/
-   opencode-personal/
-   dsh-work/
-   dsh-personal/
-   ```
+## Consistency and safety
 
-   The Syncthing `.stignore` pattern (`!{machine-id}/**`) already covers
-   these — no Syncthing changes needed.
+- opencode SQLite databases use `sqlite3 .backup` when available; otherwise
+  the script copies the database and WAL companions with a warning.
+- DSH rejects unsafe labels, non-absolute additional roots, source/destination
+  nesting, and symlinked destinations.
+- The backup is incremental and does not delete old destination files.
+- A source that does not exist is skipped, so roots may be declared before an
+  application first creates them.
 
-## Gotchas
+## Upgrade contract
 
-- **Known credential stores are excluded** (`.credentials.json`, `auth.json`,
-  `mcp-auth.json`, DSH `.credentials.yaml`, `.oauth/`, and `.env*`). Re-login
-  on restore.
-  A custom DSH credential filename or a secret manually embedded in settings
-  or transcripts cannot be identified by filename and remains the operator's
-  responsibility.
-- **Profile suffixes are not a trust boundary.** `dsh-personal/` and
-  `dsh-work/` are siblings in the same Syncthing machine tree. Every receiver
-  of that shared backup folder may receive both profiles.
-- **opencode env vars are read at process startup** — the wrapper approach
-  works, but you can't switch profiles mid-session, and IDE/desktop
-  integrations that spawn opencode won't inherit shell functions; set the
-  env vars in whatever launches opencode there.
-- **XDG vars also affect subprocesses** opencode spawns during that
-  invocation. `XDG_CONFIG_HOME` is the impactful one (git global ignore,
-  gh auth, etc.) — mitigated by the config-symlink loop above. A subprocess
-  that *creates* a new `~/.config/<tool>` inside a profile session writes it
-  under the profile root instead; re-run the symlink loop if that happens.
-- **Provider API keys inlined in the global `opencode.json` are shared** by
-  any profile that can see that config — and before the `XDG_CONFIG_HOME`
-  fix they leaked into every profile via config merging. For per-profile
-  provider accounts, issue separate keys and reference them as
-  `{env:VAR_NAME}` in each profile's config rather than inlining.
-- **opencode sessions live in SQLite** (`opencode.db`, WAL mode). The backup
-  script snapshots it with `sqlite3 .backup` for consistency; install
-  `sqlite3` on new machines (it falls back to rsync of db+wal+shm with a
-  warning otherwise).
-- **`~/.claude.json`** (user-level MCP servers, project trust/onboarding
-  state) moves inside the config dir when `CLAUDE_CONFIG_DIR` is set. If MCP
-  servers or project trust look wrong after switching profiles, check which
-  copy of this file the session is using.
-- **macOS Cursor path** differs (`~/Library/Application Support/Cursor/User`)
-  — set `CURSOR_USER_DIR` in the backup config. Cursor itself has no
-  equivalent profile env var.
+The following interfaces remain supported:
+
+- executable entrypoint: `backup.sh`;
+- common symlink entrypoint: `~/bin/backup`;
+- config path: `~/.config/backup/config`;
+- `CLAUDE_PROFILES`, `CODEX_PROFILES`, `OPENCODE_PROFILES`, and
+  `DSH_PROFILES` formats;
+- suffixed destinations produced from existing labels.
+
+Run `~/bin/backup` after an upgrade and inspect the normal log before changing
+any local configuration.
