@@ -34,14 +34,10 @@ Additional roots must use the layout produced by the upstream tool:
 | opencode | a root containing `share/opencode`, `config/opencode`, and `state/opencode` |
 | DeepSeek Harness | directory selected by `DSH_HOME` |
 
-The backup contract begins once a source directory exists. The repository's
-`agent-harness-profiles` skill can generate shell launchers and prepare OpenCode
-roots, while application-specific services remain owned by their deployment
-repositories.
-
-For the full setup workflow, read
-`.agents/skills/agent-harness-profiles/SKILL.md`. This page remains focused on
-the backup interface so the two documents do not drift into copies.
+The backup contract begins once a source directory exists. This repository does
+not create accounts, shell launchers, application roots, services, or Skill
+links. Those belong to the caller's orchestration layer; this page remains
+focused on the standalone Backup interface.
 
 ## Per-machine configuration
 
