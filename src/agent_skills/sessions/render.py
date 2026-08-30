@@ -17,9 +17,14 @@ def format_timestamp(value: datetime | None, quality: str = "exact") -> str:
     return f"~{rendered}" if quality == "approximate" else rendered
 
 
+def _without_trailing_whitespace(text: str) -> str:
+    return "\n".join(line.rstrip() for line in text.rstrip().splitlines())
+
+
 def _quote(text: str) -> str:
+    text = _without_trailing_whitespace(text)
     return "\n".join(
-        f"> {line}" if line else ">" for line in text.rstrip().splitlines()
+        f"> {line}" if line else ">" for line in text.splitlines()
     )
 
 
@@ -66,7 +71,11 @@ def render_history(session: Session, output: OutputSpec) -> str:
             [
                 f"### {format_timestamp(event.timestamp, event.timestamp_quality)} — {event.role}",
                 "",
-                _quote(event.text) if event.role == "user" else event.text,
+                (
+                    _quote(event.text)
+                    if event.role == "user"
+                    else _without_trailing_whitespace(event.text)
+                ),
                 "",
             ]
         )
@@ -125,7 +134,7 @@ def truncate_prompt(text: str, *, maximum: int, code_block_maximum: int) -> str:
             if result.count("```") % 2:
                 result += closing
         result += marker
-    return result
+    return _without_trailing_whitespace(result)
 
 
 def render_prompts(session: Session, output: OutputSpec) -> str:

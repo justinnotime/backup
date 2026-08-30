@@ -159,6 +159,51 @@ class NamingAndLayoutTest(unittest.TestCase):
         self.assertEqual(result.count("```") % 2, 0)
         self.assertTrue(result.endswith("[truncated]"))
 
+    def test_rendered_markdown_removes_event_line_end_whitespace(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            output = root / "output"
+            source.mkdir()
+            output.mkdir()
+            manifest = load_manifest(
+                write_manifest(
+                    root / "manifest.json",
+                    manifest_data(source, output),
+                ),
+                environ={"HOME": str(root)},
+            )
+            timestamp = datetime(2026, 1, 2, 3, 4, tzinfo=UTC)
+            value = replace(
+                session(),
+                events=(
+                    Event(
+                        0,
+                        timestamp,
+                        "exact",
+                        "user",
+                        "first line  \nsecond line\t",
+                        "fixture.user",
+                    ),
+                    Event(
+                        1,
+                        timestamp,
+                        "exact",
+                        "assistant",
+                        "answer  \nnext\t",
+                        "fixture.assistant",
+                    ),
+                ),
+            )
+
+            for rendered in (
+                render_history(value, manifest.output),
+                render_prompts(value, manifest.output),
+            ):
+                self.assertTrue(
+                    all(line == line.rstrip() for line in rendered.splitlines())
+                )
+
 
 class SessionDeduplicationTest(unittest.TestCase):
     @staticmethod
