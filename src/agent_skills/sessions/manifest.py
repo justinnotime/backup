@@ -12,6 +12,12 @@ from typing import Any
 
 from .model import MANIFEST_SCHEMA_VERSION, SUPPORTED_HARNESSES
 
+LEGACY_AGENT_MARKDOWN_RULE = "legacy-agent-markdown/v1"
+FROZEN_LEGACY_AGENT_MARKDOWN_RULE = "legacy-agent-markdown-frozen/v1"
+LEGACY_AGENT_MARKDOWN_RULES = frozenset(
+    {LEGACY_AGENT_MARKDOWN_RULE, FROZEN_LEGACY_AGENT_MARKDOWN_RULE}
+)
+
 
 class ManifestError(ValueError):
     """Configuration is absent, ambiguous, or unsafe."""
@@ -801,7 +807,7 @@ def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
     _only(compatibility, {"rule_version", "unchanged_sha256"}, "output.compatibility")
     compatibility_rule = _enum(
         compatibility["rule_version"],
-        {"none", "legacy-output/v1", "legacy-agent-markdown/v1"},
+        {"none", "legacy-output/v1", *LEGACY_AGENT_MARKDOWN_RULES},
         "output.compatibility.rule_version",
     )
     compatibility_hashes = _string_list(

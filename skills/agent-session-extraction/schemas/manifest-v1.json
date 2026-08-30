@@ -272,7 +272,7 @@
         "compatibility": {
           "type": "object", "additionalProperties": false, "required": ["rule_version", "unchanged_sha256"],
           "properties": {
-            "rule_version": {"enum": ["none", "legacy-output/v1", "legacy-agent-markdown/v1"]},
+            "rule_version": {"enum": ["none", "legacy-output/v1", "legacy-agent-markdown/v1", "legacy-agent-markdown-frozen/v1"]},
             "unchanged_sha256": {"type": "array", "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
           }
         }

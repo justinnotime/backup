@@ -302,7 +302,15 @@ class LegacyAdoptionTest(unittest.TestCase):
         self.assertTrue(entry.grandfathered)
         self.assertIsNone(entry.identity)
 
-    def _manifest(self, root: Path, *, migration: str = "none"):
+    def _manifest(
+        self,
+        root: Path,
+        *,
+        migration: str = "none",
+        compatibility_rule: str = "legacy-agent-markdown/v1",
+        cleanup: str = "none",
+        ownership: str = "owner",
+    ):
         source = root / "source"
         source.mkdir()
         output = root / "output"
@@ -310,12 +318,11 @@ class LegacyAdoptionTest(unittest.TestCase):
         data = manifest_data(
             source,
             output,
-            cleanup="none",
+            cleanup=cleanup,
+            ownership=ownership,
             migration=migration,
         )
-        data["output"]["compatibility"]["rule_version"] = (
-            "legacy-agent-markdown/v1"
-        )
+        data["output"]["compatibility"]["rule_version"] = compatibility_rule
         return load_manifest(
             write_manifest(root / "manifest.json", data),
             environ={"HOME": str(root)},
@@ -378,6 +385,134 @@ class LegacyAdoptionTest(unittest.TestCase):
             self.assertEqual(
                 [item for item in plan.writes if item.kind == "prompt"],
                 [],
+            )
+
+    def test_frozen_legacy_output_is_not_rewritten_or_cleaned(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self._manifest(
+                root,
+                migration="flat-to-monthly",
+                compatibility_rule="legacy-agent-markdown-frozen/v1",
+                cleanup="aggregator",
+                ownership="aggregator",
+            )
+            history = manifest.output.repository_root / "History" / "legacy.md"
+            prompt = manifest.output.repository_root / "Prompts" / "legacy.md"
+            history.parent.mkdir(parents=True)
+            prompt.parent.mkdir(parents=True)
+            history.write_text(
+                _legacy_history("session-000000000001", "older text"),
+                encoding="utf-8",
+            )
+            prompt.write_text(_legacy_prompt("older text"), encoding="utf-8")
+            inventory = scan_inventory(manifest)
+            current = _session()
+            snapshot = ExtractionSnapshot(
+                (current,),
+                (SourceOutcome("source-a", "node-a", "success", 1, 1),),
+                {},
+            )
+
+            plan = build_publication_plan(
+                manifest,
+                snapshot,
+                inventory,
+                Redactor.from_spec(manifest.redaction),
+            )
+
+            self.assertEqual(plan.writes, ())
+            self.assertEqual(plan.removals, ())
+
+            without_current_session = replace(snapshot, sessions=())
+            cleanup_plan = build_publication_plan(
+                manifest,
+                without_current_session,
+                inventory,
+                Redactor.from_spec(manifest.redaction),
+            )
+            self.assertEqual(cleanup_plan.removals, ())
+
+    def test_frozen_rule_still_writes_new_output_under_current_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self._manifest(
+                root,
+                compatibility_rule="legacy-agent-markdown-frozen/v1",
+            )
+            current = _session()
+            snapshot = ExtractionSnapshot(
+                (current,),
+                (SourceOutcome("source-a", "node-a", "success", 1, 1),),
+                {},
+            )
+
+            plan = build_publication_plan(
+                manifest,
+                snapshot,
+                scan_inventory(manifest),
+                Redactor.from_spec(manifest.redaction),
+            )
+
+            self.assertEqual({item.kind for item in plan.writes}, {"history", "prompt"})
+            self.assertTrue(
+                all(b"- Managed-By: agent-session-extraction/v1" in item.content for item in plan.writes)
+            )
+            prompt_content = next(
+                item.content.decode() for item in plan.writes if item.kind == "prompt"
+            )
+            self.assertIn("### 2026-01-02 03:04:00Z", prompt_content)
+            self.assertIn("- Project: demo\n\n---\n\n###", prompt_content)
+            self.assertTrue(prompt_content.endswith("\n\n---\n"))
+
+    def test_frozen_semantically_paired_prompt_ignores_project_removal(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self._manifest(
+                root,
+                compatibility_rule="legacy-agent-markdown-frozen/v1",
+                cleanup="aggregator",
+                ownership="aggregator",
+            )
+            manifest = replace(
+                manifest,
+                project_policy=replace(
+                    manifest.project_policy,
+                    prompt_by_harness={
+                        "codex": {
+                            "mode": "denylist",
+                            "unknown": "keep",
+                            "allowlist": (),
+                            "denylist": ("demo",),
+                        }
+                    },
+                ),
+            )
+            prompt = manifest.output.repository_root / "Prompts" / "orphan.md"
+            prompt.parent.mkdir(parents=True)
+            prompt.write_text(_legacy_prompt("hello"), encoding="utf-8")
+            inventory = scan_inventory(manifest)
+            current = _session()
+            snapshot = ExtractionSnapshot(
+                (current,),
+                (SourceOutcome("source-a", "node-a", "success", 1, 1),),
+                {},
+            )
+
+            plan = build_publication_plan(
+                manifest,
+                snapshot,
+                inventory,
+                Redactor.from_spec(manifest.redaction),
+            )
+
+            self.assertNotIn(
+                "Prompts/orphan.md",
+                {item.relative_path for item in plan.removals},
+            )
+            self.assertNotIn(
+                "Prompts/orphan.md",
+                {item.relative_path for item in plan.writes},
             )
 
     def test_flat_legacy_output_is_written_before_migration_removes_it(self) -> None:

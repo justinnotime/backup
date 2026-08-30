@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .audit import OutputInventory
-from .manifest import Manifest
+from .manifest import FROZEN_LEGACY_AGENT_MARKDOWN_RULE, Manifest
 from .model import CleanupAction, Session, SourceOutcome
 
 
@@ -39,6 +39,12 @@ def plan_cleanup(
     current = {session.identity for session in sessions}
     removals = []
     for entry in inventory.entries:
+        if (
+            manifest.output.compatibility_rule
+            == FROZEN_LEGACY_AGENT_MARKDOWN_RULE
+            and entry.grandfathered
+        ):
+            continue
         if entry.identity is None:
             continue
         if entry.kind not in {"history", "prompts"}:

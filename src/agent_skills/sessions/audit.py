@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from .manifest import Manifest
+from .manifest import LEGACY_AGENT_MARKDOWN_RULES, Manifest
 from .model import PublicationPlan, Session
 from .redact import Redactor
 from .render import MANAGED_BY
@@ -154,7 +154,7 @@ def entry_from_content(
         raise AuditError("output is not UTF-8 and is not grandfathered") from exc
     headers, title = _headers(text)
     if headers.get("Managed-By") != MANAGED_BY:
-        if compatibility_rule == "legacy-agent-markdown/v1" and legacy_kind:
+        if compatibility_rule in LEGACY_AGENT_MARKDOWN_RULES and legacy_kind:
             if PurePosixPath(relative_path).name in {"README.md", "PROVENANCE.md"}:
                 return InventoryEntry(
                     relative_path, digest, None, "static", headers, title, True

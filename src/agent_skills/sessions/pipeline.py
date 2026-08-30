@@ -18,7 +18,7 @@ from .cleanup import plan_cleanup
 from .harnesses.base import decoder_for
 from .identity import allocate_filenames, identity_digest, relative_output_path
 from .indexes import add_indexes
-from .manifest import Manifest, SourceSpec
+from .manifest import FROZEN_LEGACY_AGENT_MARKDOWN_RULE, Manifest, SourceSpec
 from .model import (
     RUN_REPORT_SCHEMA_VERSION,
     Diagnostic,
@@ -367,6 +367,16 @@ def build_publication_plan(
     inventory: OutputInventory,
     redactor: Redactor,
 ) -> PublicationPlan:
+    frozen_legacy_paths = (
+        {
+            entry.relative_path
+            for entry in inventory.entries
+            if entry.grandfathered and entry.kind in {"history", "prompts"}
+        }
+        if manifest.output.compatibility_rule
+        == FROZEN_LEGACY_AGENT_MARKDOWN_RULE
+        else set()
+    )
     strategies = {
         session.identity: manifest.output.filename_strategy_for(session.harness)
         for session in snapshot.sessions
@@ -433,6 +443,8 @@ def build_publication_plan(
             ),
         ):
             prior = existing.get((session.identity, entry_kind))
+            if prior is not None and prior.relative_path in frozen_legacy_paths:
+                continue
             duplicates = duplicate_existing.get((session.identity, entry_kind), [])
             if len(duplicates) > 1:
                 for duplicate in duplicates:
@@ -458,6 +470,11 @@ def build_publication_plan(
                 if len(available) == 1:
                     prior = available[0]
                     claimed_legacy_prompts.add(prior.relative_path)
+            # Identity-less legacy prompts are paired by semantic content above.
+            # Apply the freeze again after that pairing so project policy and
+            # migration cannot rewrite or remove a newly claimed legacy file.
+            if prior is not None and prior.relative_path in frozen_legacy_paths:
+                continue
             if entry_kind == "prompts" and not prompt_project_allowed(
                 manifest, session
             ):
@@ -547,6 +564,12 @@ def build_publication_plan(
     for item in explicit_removals:
         if (item.relative_path, item.identity) not in removal_keys:
             removals.append(item)
+    touched_frozen = frozen_legacy_paths.intersection(
+        {item.relative_path for item in writes}
+        | {item.relative_path for item in removals}
+    )
+    if touched_frozen:
+        raise PipelineError("FROZEN_LEGACY_OUTPUT_MUTATION")
     return PublicationPlan(
         tuple(sorted(writes, key=lambda item: item.relative_path)),
         tuple(sorted(removals, key=lambda item: item.relative_path)),

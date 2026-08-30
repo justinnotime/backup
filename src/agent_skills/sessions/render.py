@@ -132,17 +132,19 @@ def render_prompts(session: Session, output: OutputSpec) -> str:
     prompts = [event for event in session.events if event.role == "user"]
     lines = [f"# Prompts — {_title(session)}", ""]
     lines.extend(f"- {header}" for header in _headers(session, output, "prompts"))
-    lines.append("")
+    lines.extend(["", "---", ""])
     for event in prompts:
         lines.extend(
             [
-                f"## {format_timestamp(event.timestamp, event.timestamp_quality)}",
+                f"### {format_timestamp(event.timestamp, event.timestamp_quality)}",
                 "",
                 truncate_prompt(
                     event.text,
                     maximum=output.prompt_max_chars,
                     code_block_maximum=output.prompt_code_block_max_chars,
                 ),
+                "",
+                "---",
                 "",
             ]
         )
