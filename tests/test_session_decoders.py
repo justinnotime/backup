@@ -331,6 +331,8 @@ class ClaudeDecoderTest(unittest.TestCase):
     def test_current_metadata_records_are_explicitly_ignored(self) -> None:
         metadata_records = (
             {"type": "ai-title", "aiTitle": "synthetic title"},
+            {"type": "agent-name", "agentName": "synthetic agent"},
+            {"type": "bridge-session", "bridgeSessionId": "synthetic bridge"},
             {"type": "agent-setting", "setting": "synthetic setting"},
             {"type": "atis-latch", "atis": "synthetic state"},
             {"type": "cost-state", "cost": "synthetic cost state"},
@@ -786,6 +788,28 @@ class CodexDecoderTest(unittest.TestCase):
             ["synthetic codex request", "synthetic canonical answer"],
         )
         self.assertNotIn("synthetic competing answer", repr(result.sessions))
+
+    def test_response_item_image_prefix_matches_legacy_user_text(self) -> None:
+        result = self.decode(
+            codex_meta(),
+            *codex_legacy(),
+            *codex_response(
+                '<image name=[Image #1] path="/synthetic/image.png">\n'
+                "</image>\n"
+                "synthetic codex request"
+            ),
+        )
+
+        self.assertEqual(result.completeness, "complete")
+        self.assertNotIn(
+            "CODEX_STREAM_DIVERGENCE",
+            {item.code for item in result.diagnostics},
+        )
+        self.assertEqual(
+            [event.text for event in result.sessions[0].events],
+            ["synthetic codex request", "synthetic codex answer"],
+        )
+        self.assertNotIn("/synthetic/image.png", repr(result.sessions))
 
     def test_shared_message_key_conflict_cannot_hide_as_a_subsequence(self) -> None:
         items = codex_items(answer="synthetic old answer")

@@ -31,6 +31,10 @@ _DEFAULT_SYNTHETIC_PREFIXES = (
 _TITLE_TRAILER_RE = re.compile(
     r"\n+Based on this message, call functions\.happy__change_title.*$", re.DOTALL
 )
+_IMAGE_PREFIX_RE = re.compile(
+    r'\A(?:<image name=\[Image #[0-9]+\] path="[^"\r\n]+">\r?\n'
+    r'(?:</image>\r?\n)?)+'
+)
 _KNOWN_IGNORED_EVENT_MESSAGES = {
     "task_started",
     "task_complete",
@@ -110,7 +114,7 @@ def _content_text(content: Any, allowed_types: set[str] | None = None) -> str:
 def _clean_user_text(value: Any) -> str:
     if not isinstance(value, str):
         return ""
-    return _TITLE_TRAILER_RE.sub("", value).strip()
+    return _TITLE_TRAILER_RE.sub("", _IMAGE_PREFIX_RE.sub("", value)).strip()
 
 
 def _option_prefixes(options: Mapping[str, Any]) -> tuple[str, ...]:
