@@ -1,0 +1,256 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/agent-session-extraction/manifest-v1.json",
+  "title": "Agent Session Extraction Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "node_label", "sources", "ownership", "event_policy",
+    "project_policy", "output", "transforms", "cleanup", "indexes",
+    "publisher", "gates"
+  ],
+  "properties": {
+    "schema_version": {"const": "agent-session-extraction-manifest/v1"},
+    "node_label": {"$ref": "#/$defs/label"},
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/source"}
+    },
+    "ownership": {
+      "type": "object", "additionalProperties": false, "required": ["mode"],
+      "properties": {"mode": {"enum": ["owner", "aggregator"]}}
+    },
+    "event_policy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["synthetic_prefixes", "peer_agent_prefixes", "peer_agent_exact", "min_direct_user_events", "min_user_chars", "retain_conversational_subagents"],
+      "properties": {
+        "synthetic_prefixes": {"$ref": "#/$defs/strings"},
+        "peer_agent_prefixes": {"$ref": "#/$defs/strings"},
+        "peer_agent_exact": {"$ref": "#/$defs/strings"},
+        "min_direct_user_events": {"type": "integer", "minimum": 1},
+        "min_user_chars": {"type": "integer", "minimum": 1},
+        "retain_conversational_subagents": {"type": "boolean"}
+      }
+    },
+    "project_policy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["mode", "unknown", "allowlist", "denylist", "aliases"],
+      "properties": {
+        "mode": {"enum": ["all", "allowlist", "denylist"]},
+        "unknown": {"enum": ["keep", "drop", "fail"]},
+        "allowlist": {"$ref": "#/$defs/strings"},
+        "denylist": {"$ref": "#/$defs/strings"},
+        "aliases": {"type": "object", "additionalProperties": {"type": "string"}}
+      }
+    },
+    "output": {"$ref": "#/$defs/output"},
+    "transforms": {"$ref": "#/$defs/transforms"},
+    "cleanup": {"$ref": "#/$defs/cleanup"},
+    "indexes": {
+      "type": "object", "additionalProperties": false, "required": ["mode"],
+      "properties": {"mode": {"enum": ["none", "owner", "every-node", "aggregator-only"]}}
+    },
+    "publisher": {"$ref": "#/$defs/publisher"},
+    "gates": {"$ref": "#/$defs/gates"}
+  },
+  "$defs": {
+    "label": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},
+    "strings": {"type": "array", "items": {"type": "string"}},
+    "nonEmptyStrings": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "absolutePath": {"type": "string", "pattern": "^/"},
+    "relativePath": {"type": "string", "pattern": "^(?!/)(?!\\.$)(?!.*(?:^|/)\\.git(?:/|$))(?!.*(?:^|/)\\.\\.(?:/|$)).+"},
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "enabled", "harness", "path", "authority", "required", "output_node", "root_policy", "snapshot", "discovery", "decoder", "allow_empty"],
+      "properties": {
+        "id": {"$ref": "#/$defs/label"},
+        "enabled": {"type": "boolean"},
+        "harness": {"enum": ["claude-code", "codex", "opencode", "dsh", "cursor", "openclaw"]},
+        "path": {
+          "oneOf": [
+            {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"const": "explicit"}, "value": {"$ref": "#/$defs/absolutePath"}}},
+            {"type": "object", "additionalProperties": false, "required": ["kind"], "properties": {"kind": {"const": "native-default"}}}
+          ]
+        },
+        "authority": {"enum": ["owner", "mirror"]},
+        "required": {"type": "boolean"},
+        "output_node": {"$ref": "#/$defs/label"},
+        "root_policy": {"$ref": "#/$defs/rootPolicy"},
+        "snapshot": {"enum": ["stable-bytes", "sqlite-readonly"]},
+        "discovery": {"$ref": "#/$defs/discovery"},
+        "decoder": {"type": "object"},
+        "allow_empty": {"type": "boolean"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"harness": {"const": "claude-code"}}, "required": ["harness"]},
+          "then": {"properties": {"snapshot": {"const": "stable-bytes"}, "decoder": {"$ref": "#/$defs/claudeDecoder"}}}
+        },
+        {
+          "if": {"properties": {"harness": {"const": "codex"}}, "required": ["harness"]},
+          "then": {"properties": {"snapshot": {"const": "stable-bytes"}, "decoder": {"$ref": "#/$defs/codexDecoder"}}}
+        },
+        {
+          "if": {"properties": {"harness": {"const": "opencode"}}, "required": ["harness"]},
+          "then": {"properties": {"snapshot": {"const": "sqlite-readonly"}, "decoder": {"$ref": "#/$defs/opencodeDecoder"}}}
+        },
+        {
+          "if": {"properties": {"harness": {"const": "dsh"}}, "required": ["harness"]},
+          "then": {"properties": {"snapshot": {"const": "stable-bytes"}, "decoder": {"$ref": "#/$defs/dshDecoder"}}}
+        },
+        {
+          "if": {"properties": {"harness": {"const": "cursor"}}, "required": ["harness"]},
+          "then": {"properties": {"snapshot": {"const": "stable-bytes"}, "decoder": {"$ref": "#/$defs/cursorDecoder"}}}
+        },
+        {
+          "if": {"properties": {"harness": {"const": "openclaw"}}, "required": ["harness"]},
+          "then": {"properties": {"snapshot": {"const": "stable-bytes"}, "decoder": {"$ref": "#/$defs/openclawDecoder"}}}
+        }
+      ]
+    },
+    "rootPolicy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["allowed_lexical_roots", "allowed_resolved_roots", "forbidden_components", "required_suffixes", "candidate_beneath_root", "symlinks"],
+      "properties": {
+        "allowed_lexical_roots": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/absolutePath"}},
+        "allowed_resolved_roots": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/absolutePath"}},
+        "forbidden_components": {"$ref": "#/$defs/strings"},
+        "required_suffixes": {"$ref": "#/$defs/nonEmptyStrings"},
+        "candidate_beneath_root": {"type": "boolean"},
+        "symlinks": {"enum": ["reject", "confined"]}
+      }
+    },
+    "discovery": {
+      "type": "object", "additionalProperties": false, "required": ["mode", "patterns"],
+      "properties": {"mode": {"enum": ["file", "glob"]}, "patterns": {"$ref": "#/$defs/strings"}}
+    },
+    "claudeDecoder": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "session_id": {"type": "string", "minLength": 1},
+        "project_hint": {"type": "string", "minLength": 1},
+        "conversation_kind": {"enum": ["main", "conversational-subagent"]},
+        "conversational_subagent_min_user_events": {"type": "integer", "minimum": 1}
+      }
+    },
+    "codexDecoder": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "session_id": {"type": "string", "minLength": 1},
+        "project_hint": {"type": "string", "minLength": 1}
+      }
+    },
+    "opencodeDecoder": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "minimum_user_events": {"type": "integer", "minimum": 1},
+        "excluded_cwd_prefixes": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "dshDecoder": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "compression": {"enum": ["auto", "plain", "zstd"]},
+        "allow_torn_current_frame": {"type": "boolean"}
+      }
+    },
+    "cursorDecoder": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "session_id": {"type": "string", "minLength": 1},
+        "project_hint": {"type": "string", "minLength": 1},
+        "minimum_user_events": {"type": "integer", "minimum": 1}
+      }
+    },
+    "openclawDecoder": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "session_id": {"type": "string", "minLength": 1},
+        "project_hint": {"type": "string", "minLength": 1},
+        "minimum_user_events": {"type": "integer", "minimum": 1},
+        "is_cron_session": {"type": "boolean"},
+        "operational_notification_prefixes": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "channel_forward_prefixes": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "exclude_operational_notifications": {"type": "boolean"},
+        "retain_channel_forwarded": {"type": "boolean"},
+        "exclude_cron_sessions": {"type": "boolean"},
+        "include_channel_metadata": {"type": "boolean"},
+        "include_session_metadata": {"type": "boolean"},
+        "session_metadata_fields": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "channel": {"type": "string", "minLength": 1}
+      }
+    },
+    "output": {
+      "type": "object", "additionalProperties": false,
+      "required": ["repository_root", "history_directory", "prompt_directory", "layout", "migration", "prompt_max_chars", "prompt_code_block_max_chars", "encryption_attributes", "compatibility"],
+      "properties": {
+        "repository_root": {"$ref": "#/$defs/absolutePath"},
+        "history_directory": {"$ref": "#/$defs/relativePath"},
+        "prompt_directory": {"$ref": "#/$defs/relativePath"},
+        "layout": {"enum": ["flat", "monthly"]},
+        "migration": {"enum": ["none", "flat-to-monthly"]},
+        "prompt_max_chars": {"type": "integer", "minimum": 64},
+        "prompt_code_block_max_chars": {"type": "integer", "minimum": 16},
+        "encryption_attributes": {"type": "object", "additionalProperties": {"type": "string"}},
+        "compatibility": {
+          "type": "object", "additionalProperties": false, "required": ["rule_version", "unchanged_sha256"],
+          "properties": {
+            "rule_version": {"enum": ["none", "legacy-output/v1"]},
+            "unchanged_sha256": {"type": "array", "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+          }
+        }
+      }
+    },
+    "transforms": {
+      "type": "object", "additionalProperties": false, "required": ["redaction"],
+      "properties": {
+        "redaction": {
+          "type": "object", "additionalProperties": false, "required": ["required", "builtin_policy", "patterns"],
+          "properties": {
+            "required": {"type": "boolean"}, "builtin_policy": {"enum": ["default", "none"]},
+            "patterns": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["name", "regex", "canary"], "properties": {"name": {"type": "string"}, "regex": {"type": "string"}, "canary": {"type": "string"}}}}
+          }
+        }
+      }
+    },
+    "cleanup": {
+      "type": "object", "additionalProperties": false, "required": ["scope"],
+      "properties": {"scope": {"enum": ["none", "owner", "aggregator"]}}
+    },
+    "publisher": {
+      "type": "object", "additionalProperties": false, "required": ["strategy", "owned_subtrees", "encryption", "key_link", "ciphertext_checkout"],
+      "properties": {
+        "strategy": {"enum": ["none", "filesystem-atomic", "git-worktree"]},
+        "owned_subtrees": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/relativePath"}},
+        "encryption": {"enum": ["none", "git-crypt"]},
+        "key_link": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["source", "target"],
+              "properties": {
+                "source": {"$ref": "#/$defs/absolutePath"},
+                "target": {"$ref": "#/$defs/relativePath"}
+              }
+            }
+          ]
+        },
+        "ciphertext_checkout": {"const": "refuse"}
+      }
+    },
+    "gates": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_failure", "require_redaction_self_test", "require_output_audit", "require_reconciliation", "require_prepublication_scan"],
+      "properties": {
+        "source_failure": {"enum": ["abort-required", "abort-any"]},
+        "require_redaction_self_test": {"type": "boolean"},
+        "require_output_audit": {"type": "boolean"},
+        "require_reconciliation": {"type": "boolean"},
+        "require_prepublication_scan": {"type": "boolean"}
+      }
+    }
+  }
+}

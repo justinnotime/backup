@@ -1,0 +1,117 @@
+"""Stable public API for scripts, schedulers, and shadow adapters."""
+
+from __future__ import annotations
+
+import os
+from collections.abc import Mapping
+from pathlib import Path
+
+from .manifest import Manifest, load_manifest
+from .model import Diagnostic, ReconcileReport, RunReport
+from .pipeline import PipelineError, evaluate_pipeline, extract_sessions, run_pipeline
+from .reconcile import clear_failure_marker, write_failure_marker
+from .redact import Redactor
+from .sources import SourceAccessError, validate_configured_path
+
+
+def _environment(environ: Mapping[str, str] | None) -> Mapping[str, str]:
+    if environ is not None:
+        return environ
+    # HOME is the only ambient value understood by manifest v1.
+    return {"HOME": os.environ.get("HOME", "")}
+
+
+def run(
+    manifest_path: str | os.PathLike[str],
+    *,
+    dry_run: bool = False,
+    environ: Mapping[str, str] | None = None,
+    failure_marker: Path | None = None,
+    git_worktree_destination: Path | None = None,
+) -> RunReport:
+    manifest = load_manifest(manifest_path, environ=_environment(environ))
+    try:
+        report, _snapshot, _plan = run_pipeline(
+            manifest,
+            dry_run=dry_run,
+            git_worktree_destination=git_worktree_destination,
+        )
+    except PipelineError as exc:
+        if failure_marker is not None and not dry_run:
+            write_failure_marker(
+                failure_marker,
+                ReconcileReport(
+                    False,
+                    exc.checks,
+                    exc.diagnostics or (Diagnostic(exc.code, "pipeline"),),
+                ),
+            )
+        raise
+    if failure_marker is not None and not dry_run:
+        clear_failure_marker(failure_marker)
+    return report
+
+
+def doctor(
+    manifest_path: str | os.PathLike[str],
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> dict[str, object]:
+    """Validate capabilities and configured roots without decoding transcripts."""
+    manifest = load_manifest(manifest_path, environ=_environment(environ))
+    Redactor.from_spec(manifest.redaction)
+    from .harnesses.base import decoder_for
+    from .pipeline import _load_decoders
+
+    _load_decoders()
+    sources = []
+    ok = True
+    for source in manifest.sources:
+        if not source.enabled:
+            sources.append({"id": source.source_id, "status": "disabled"})
+            continue
+        try:
+            validate_configured_path(source)
+            capabilities = decoder_for(source.harness).capabilities()
+            sources.append(
+                {
+                    "id": source.source_id,
+                    "status": "ok",
+                    "capabilities": list(capabilities),
+                }
+            )
+        except (SourceAccessError, OSError, ValueError):
+            ok = False
+            sources.append({"id": source.source_id, "status": "invalid"})
+    return {
+        "schema_version": "agent-session-doctor-report/v1",
+        "status": "ok" if ok else "failed",
+        "sources": sources,
+    }
+
+
+def reconcile(
+    manifest_path: str | os.PathLike[str],
+    *,
+    environ: Mapping[str, str] | None = None,
+    failure_marker: Path | None = None,
+) -> ReconcileReport:
+    manifest = load_manifest(manifest_path, environ=_environment(environ))
+    _snapshot, _inventory, _plan, report, _redactor = evaluate_pipeline(manifest)
+    if failure_marker is not None:
+        if report.ok:
+            clear_failure_marker(failure_marker)
+        else:
+            write_failure_marker(failure_marker, report)
+    return report
+
+
+__all__ = [
+    "Manifest",
+    "PipelineError",
+    "doctor",
+    "extract_sessions",
+    "load_manifest",
+    "reconcile",
+    "run",
+]
