@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Harness Profiles"
+  short_description: "Install configuration-driven harness profiles"
+  default_prompt: "Use $agent-harness-profiles with the caller-owned configuration to inspect or install isolated harness roots without inferring label meaning."

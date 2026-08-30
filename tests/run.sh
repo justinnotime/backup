@@ -60,6 +60,36 @@ HOME="${legacy_home}" "${ROOT_DIR}/backup.sh" >/dev/null
 assert_file "${legacy_home}/sync/backup/fixture-legacy/dsh-alternate/sessions/alternate.jsonl"
 assert_not_exists "${legacy_home}/sync/backup/fixture-legacy/dsh"
 
+profile_home="${TEMP_ROOT}/profiles"
+profile_config="${profile_home}/.config/backup/config"
+install -d -m 0700 "$(dirname -- "${profile_config}")" "${profile_home}/.config/example-tool"
+cat > "${profile_config}" <<EOF
+MACHINE_ID="fixture-profiles"
+BACKUP_ROOT="${profile_home}/sync/backup/fixture-profiles"
+BACKUP_LOG="${profile_home}/backup.log"
+CLAUDE_PROFILES="alpha:${profile_home}/.claude-alpha beta:${profile_home}/.claude-beta"
+CODEX_PROFILES="alpha:${profile_home}/.codex-alpha beta:${profile_home}/.codex-beta"
+OPENCODE_PROFILES="alpha:${profile_home}/.opencode-alpha beta:${profile_home}/.opencode-beta"
+DSH_PROFILES="alpha:${profile_home}/.dsh-alpha
+beta:${profile_home}/.dsh-beta"
+EOF
+HOME="${profile_home}" \
+  "${ROOT_DIR}/skills/agent-harness-profiles/scripts/install.sh" \
+  --config "${profile_config}" >/dev/null
+for launcher in claude-alpha claude-beta codex-alpha codex-beta opencode-alpha opencode-beta dsh-alpha dsh-beta; do
+  grep -q "^${launcher}()" "${profile_home}/.config/agent-harness-profiles/launchers.sh" ||
+    fail "generated launcher is missing: ${launcher}"
+done
+for label in alpha beta; do
+  assert_file "${profile_home}/.opencode-${label}/config/opencode/opencode.json"
+  [[ -L "${profile_home}/.claude-${label}/skills/agent-harness-profiles" ]] ||
+    fail "configured Claude Skill link is missing: ${label}"
+done
+[[ -L "${profile_home}/.agents/skills/agent-harness-profiles" ]] ||
+  fail 'shared Agent Skill link is missing'
+[[ "$(readlink -f -- "${profile_home}/bin/backup")" == "$(readlink -f -- "${ROOT_DIR}/backup.sh")" ]] ||
+  fail 'stable Backup command link has the wrong target'
+
 forbidden_label_one='pers''onal'
 forbidden_label_two='wo''rk'
 if grep -R -n -i -E "\\b(${forbidden_label_one}|${forbidden_label_two})\\b" \

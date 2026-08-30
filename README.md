@@ -3,7 +3,8 @@
 This repository retains its `backup` name and stable backup entrypoints while
 growing into a collection of deterministic agent-harness Skills. It contains a
 state backup, Syncthing diagnostics, a remote clipboard helper, and a shared
-session-extraction runtime.
+session-extraction runtime. It also provides generic setup helpers for named
+harness roots; callers retain all label meaning in their own configuration.
 
 The repository works in both shapes:
 
@@ -25,6 +26,7 @@ trust semantics to them.
 | `syncthing-doctor.sh` | Stable compatibility link for Syncthing diagnostics |
 | `skills/remote-clipboard/` | Remote-to-local clipboard Skill and shell function |
 | `clip.sh` | Stable compatibility link for the clipboard shell helper |
+| `skills/agent-harness-profiles/` | Configuration-driven launcher and Skill-link setup |
 | `skills/agent-session-extraction/` | Manifest-driven extraction Skill and command wrappers |
 | `src/agent_skills/sessions/` | Shared normalized-session runtime |
 | `tests/run.sh` | Default-only and legacy multi-root compatibility checks |
