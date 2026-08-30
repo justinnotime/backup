@@ -108,6 +108,69 @@ class DryRunTest(unittest.TestCase):
             self.assertEqual(report.session_count, 1)
             self.assertEqual(report.write_count, 2)
 
+    def test_exact_superseded_candidate_is_visible_and_excluded(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            old_directory = source / "old-project"
+            current_directory = source / "current-project"
+            old_directory.mkdir(parents=True)
+            current_directory.mkdir(parents=True)
+            old_candidate = old_directory / "session.jsonl"
+            current_candidate = current_directory / "session.jsonl"
+            write_claude(old_candidate, text="superseded synthetic request")
+            write_claude(current_candidate, text="current synthetic request")
+            old_digest = hashlib.sha256(old_candidate.read_bytes()).hexdigest()
+            output = root / "output"
+            output.mkdir()
+            data = manifest_data(source, output)
+            data["sources"][0]["discovery"]["superseded_sha256"] = [old_digest]
+            manifest_path = write_manifest(root / "manifest.json", data)
+
+            snapshot, _inventory, _plan, reconciliation, _redactor = (
+                evaluate_pipeline(
+                    load_manifest(manifest_path, environ={"HOME": str(root)})
+                )
+            )
+
+            self.assertTrue(reconciliation.ok)
+            self.assertEqual(len(snapshot.sessions), 1)
+            self.assertEqual(
+                {item.code for item in snapshot.diagnostics},
+                {"SOURCE_CANDIDATE_SUPERSEDED"},
+            )
+            report = run(manifest_path, dry_run=True, environ={"HOME": str(root)})
+            self.assertEqual(report.status, "ok")
+            self.assertIn("SOURCE_CANDIDATE_SUPERSEDED", report.diagnostic_codes)
+
+            write_claude(old_candidate, text="changed divergent synthetic request")
+            with self.assertRaisesRegex(
+                PipelineError, "RECONCILIATION_FAILURE"
+            ):
+                run(manifest_path, dry_run=True, environ={"HOME": str(root)})
+
+    def test_superseded_hash_does_not_bypass_candidate_path_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            source.mkdir()
+            outside = root / "outside.jsonl"
+            write_claude(outside, text="outside synthetic request")
+            (source / "escaped.jsonl").symlink_to(outside)
+            output = root / "output"
+            output.mkdir()
+            data = manifest_data(source, output)
+            data["sources"][0]["discovery"]["superseded_sha256"] = [
+                hashlib.sha256(outside.read_bytes()).hexdigest()
+            ]
+
+            with self.assertRaisesRegex(PipelineError, "SOURCE_FAILURE"):
+                run(
+                    write_manifest(root / "manifest.json", data),
+                    dry_run=True,
+                    environ={"HOME": str(root)},
+                )
+
     def test_git_worktree_rejects_owned_output_that_differs_from_head(self) -> None:
         for difference in (
             "tracked",

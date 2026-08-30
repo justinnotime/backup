@@ -154,6 +154,11 @@ def decode_source_snapshots(
     observations = []
     diagnostics = []
     for snapshot in snapshots:
+        if _is_superseded_snapshot(source, snapshot):
+            diagnostics.append(
+                Diagnostic("SOURCE_CANDIDATE_SUPERSEDED", source.source_id, count=1)
+            )
+            continue
         decoded, observed, snapshot_diagnostics, complete = _decode_snapshot(
             manifest, source, snapshot
         )
@@ -162,6 +167,8 @@ def decode_source_snapshots(
         sessions.extend(decoded)
         observations.append(observed)
         diagnostics.extend(snapshot_diagnostics)
+    if snapshots and not observations and not source.allow_empty:
+        raise SourceAccessError("all source snapshots are explicitly superseded")
     deduplicated, duplicate_diagnostics = deduplicate_sessions(sessions)
     diagnostics.extend(duplicate_diagnostics)
     outcome = SourceOutcome(
@@ -180,6 +187,19 @@ def decode_source_snapshots(
     )
 
 
+def _is_superseded_snapshot(source: SourceSpec, snapshot) -> bool:
+    if not source.discovery.superseded_sha256:
+        return False
+    if snapshot.payload is None:
+        raise SourceAccessError(
+            "superseded candidate policy requires a byte-backed snapshot"
+        )
+    return (
+        hashlib.sha256(snapshot.payload).hexdigest()
+        in source.discovery.superseded_sha256
+    )
+
+
 def _extract_source(manifest: Manifest, source: SourceSpec):
     source_sessions = []
     observations = []
@@ -189,8 +209,17 @@ def _extract_source(manifest: Manifest, source: SourceSpec):
         candidates = discover_candidates(source, root)
         if not candidates and not source.allow_empty:
             raise SourceAccessError("source contains no candidates")
+        selected_candidates = 0
         for candidate in candidates:
             snapshot = snapshot_candidate(source, root, candidate)
+            if _is_superseded_snapshot(source, snapshot):
+                diagnostics.append(
+                    Diagnostic(
+                        "SOURCE_CANDIDATE_SUPERSEDED", source.source_id, count=1
+                    )
+                )
+                continue
+            selected_candidates += 1
             decoded, observed, snapshot_diagnostics, complete = _decode_snapshot(
                 manifest, source, snapshot, validated_root=root
             )
@@ -201,6 +230,8 @@ def _extract_source(manifest: Manifest, source: SourceSpec):
                     "decoder did not produce a complete source view"
                 )
             source_sessions.extend(decoded)
+        if candidates and not selected_candidates and not source.allow_empty:
+            raise SourceAccessError("all source candidates are explicitly superseded")
         return (
             source_sessions,
             _merge_observations(observations),

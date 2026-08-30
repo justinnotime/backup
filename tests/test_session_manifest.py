@@ -49,6 +49,7 @@ class ManifestTest(unittest.TestCase):
         self.assertEqual(
             manifest.sources[0].decoder["grandfathered_malformed_line_sha256"], []
         )
+        self.assertEqual(manifest.sources[0].discovery.superseded_sha256, ())
         self.assertEqual(manifest.sources[2].decoder["minimum_total_events"], 2)
         self.assertEqual(manifest.event_policy.retention_mode, "count-or-long")
         self.assertEqual(manifest.project_policy.resolvers[0]["field"], "source_ref")
@@ -128,6 +129,12 @@ class ManifestTest(unittest.TestCase):
         invalid_key_target["publisher"]["key_link"]["target"] = ".runtime/key"
         self.assertTrue(tuple(validator.iter_errors(invalid_key_target)))
 
+        invalid_superseded_hash = json.loads(json.dumps(example))
+        invalid_superseded_hash["sources"][0]["discovery"][
+            "superseded_sha256"
+        ] = ["NOT-A-SHA256"]
+        self.assertTrue(tuple(validator.iter_errors(invalid_superseded_hash)))
+
         invalid_openclaw_minimum = json.loads(json.dumps(example))
         invalid_openclaw_minimum["sources"][2]["decoder"]["minimum_total_events"] = 0
         self.assertTrue(tuple(validator.iter_errors(invalid_openclaw_minimum)))
@@ -147,6 +154,39 @@ class ManifestTest(unittest.TestCase):
             bad.write_text("{}", encoding="utf-8")
             with self.assertRaises(ManifestError):
                 load_manifest(bad, environ={"HOME": str(root)})
+
+    def test_superseded_candidate_hashes_are_strict_and_byte_backed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            output = root / "output"
+            source.mkdir()
+            output.mkdir()
+            for values in (["A" * 64], ["0" * 64, "0" * 64]):
+                with self.subTest(values=values):
+                    data = manifest_data(source, output)
+                    data["sources"][0]["discovery"][
+                        "superseded_sha256"
+                    ] = values
+                    with self.assertRaises(ManifestError):
+                        load_manifest(
+                            write_manifest(root / "manifest.json", data),
+                            environ={"HOME": str(root)},
+                        )
+
+            data = manifest_data(
+                source,
+                output,
+                harness="opencode",
+                discovery_mode="file",
+                snapshot="sqlite-readonly",
+            )
+            data["sources"][0]["discovery"]["superseded_sha256"] = ["0" * 64]
+            with self.assertRaises(ManifestError):
+                load_manifest(
+                    write_manifest(root / "manifest.json", data),
+                    environ={"HOME": str(root)},
+                )
 
     def test_backup_profile_labels_do_not_select_sources(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

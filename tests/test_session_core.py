@@ -27,6 +27,7 @@ from agent_skills.sessions.model import (
     SourceOutcome,
 )
 from agent_skills.sessions.pipeline import build_publication_plan
+from agent_skills.sessions.policies import deduplicate_sessions
 from agent_skills.sessions.redact import RedactionError, Redactor
 from agent_skills.sessions.render import render_history, render_prompts, truncate_prompt
 
@@ -157,6 +158,68 @@ class NamingAndLayoutTest(unittest.TestCase):
         self.assertLessEqual(len(result), 64)
         self.assertEqual(result.count("```") % 2, 0)
         self.assertTrue(result.endswith("[truncated]"))
+
+
+class SessionDeduplicationTest(unittest.TestCase):
+    @staticmethod
+    def _with_events(
+        value: Session,
+        source_ref: str,
+        texts: tuple[str, ...],
+        *,
+        minute: int,
+    ) -> Session:
+        events = tuple(
+            Event(
+                index,
+                datetime(2026, 1, 2, 3, minute, index, tzinfo=UTC),
+                "approximate",
+                "user" if index % 2 == 0 else "assistant",
+                text,
+                "fixture.message",
+            )
+            for index, text in enumerate(texts)
+        )
+        return replace(
+            value,
+            source_ref=source_ref,
+            started_at=events[0].timestamp,
+            ended_at=events[-1].timestamp,
+            events=events,
+        )
+
+    def test_strict_prefix_selects_complete_generation_without_diagnostic(self) -> None:
+        base = session()
+        partial = self._with_events(
+            base, "mirror/session.jsonl", ("first",), minute=4
+        )
+        complete = self._with_events(
+            base,
+            "owner/session.jsonl",
+            ("first", "second", "third"),
+            minute=5,
+        )
+
+        selected, diagnostics = deduplicate_sessions([partial, complete])
+
+        self.assertEqual(selected, (complete,))
+        self.assertEqual(diagnostics, ())
+
+    def test_non_prefix_content_conflict_remains_visible(self) -> None:
+        base = session()
+        first = self._with_events(
+            base, "source-a/session.jsonl", ("first", "answer-a"), minute=4
+        )
+        second = self._with_events(
+            base, "source-b/session.jsonl", ("first", "answer-b"), minute=5
+        )
+
+        selected, diagnostics = deduplicate_sessions([first, second])
+
+        self.assertEqual(selected, (first,))
+        self.assertEqual(len(diagnostics), 1)
+        self.assertEqual(diagnostics[0].code, "DUPLICATE_SESSION_DIVERGENCE")
+        self.assertEqual(diagnostics[0].count, 2)
 
 
 class CleanupTest(unittest.TestCase):

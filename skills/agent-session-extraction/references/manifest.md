@@ -65,6 +65,14 @@ OpenCode has two explicit read-only modes:
 A moving database, escaped sidecar, or mode precondition failure makes the
 source unreadable; existing output is preserved and cleanup is blocked.
 
+`sources[].discovery.superseded_sha256` may list exact hashes of immutable
+historical candidate bytes that an owning consumer has explicitly replaced.
+Every matching candidate still passes path validation and a stable read before
+it is excluded. The run reports `SOURCE_CANDIDATE_SUPERSEDED` without the hash,
+path, or transcript. If those bytes change, the hash no longer matches and the
+candidate is decoded normally. Non-empty values are valid only with
+`stable-bytes` snapshots and belong in the consumer's private manifest.
+
 | Harness | Optional `decoder` fields |
 |---|---|
 | Claude Code | `session_id`, `project_hint`, `conversation_kind`, `conversational_subagent_min_user_events`, `grandfathered_malformed_line_sha256` |

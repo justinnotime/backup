@@ -186,11 +186,22 @@ def deduplicate_sessions(
         candidates.sort(key=lambda item: (-len(item.events), item.source_ref))
         winner = candidates[0]
         selected.append(winner)
-        signatures = {
-            tuple((event.role, event.text, event.timestamp) for event in item.events)
-            for item in candidates
-        }
-        if len(signatures) > 1:
+        winner_signature = tuple(
+            (event.role, event.text) for event in winner.events
+        )
+        # A live source and its mirror may expose the same append-only session
+        # at different generations.  An exact role/text prefix is therefore a
+        # deterministically older snapshot, not a content conflict.  Timestamp
+        # quality is deliberately excluded: some harnesses only approximate
+        # assistant times.  Any non-prefix difference remains reconciliation-
+        # fatal so competing conversation histories cannot be selected by
+        # source ordering alone.
+        diverged = any(
+            tuple((event.role, event.text) for event in item.events)
+            != winner_signature[: len(item.events)]
+            for item in candidates[1:]
+        )
+        if diverged:
             diagnostics.append(
                 Diagnostic(
                     "DUPLICATE_SESSION_DIVERGENCE",

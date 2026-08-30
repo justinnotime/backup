@@ -19,7 +19,11 @@
         "symlinks": "confined"
       },
       "snapshot": "stable-bytes",
-      "discovery": {"mode": "glob", "patterns": ["**/*.jsonl"]},
+      "discovery": {
+        "mode": "glob",
+        "patterns": ["**/*.jsonl"],
+        "superseded_sha256": []
+      },
       "decoder": {"grandfathered_malformed_line_sha256": []},
       "event_policy": {
         "min_direct_user_events": 2,

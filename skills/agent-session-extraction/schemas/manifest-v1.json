@@ -174,7 +174,15 @@
     },
     "discovery": {
       "type": "object", "additionalProperties": false, "required": ["mode", "patterns"],
-      "properties": {"mode": {"enum": ["file", "glob"]}, "patterns": {"$ref": "#/$defs/strings"}}
+      "properties": {
+        "mode": {"enum": ["file", "glob"]},
+        "patterns": {"$ref": "#/$defs/strings"},
+        "superseded_sha256": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
     },
     "claudeDecoder": {
       "type": "object", "additionalProperties": false,

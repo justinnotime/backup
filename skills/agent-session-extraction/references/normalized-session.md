@@ -31,6 +31,13 @@ the label policy therefore cannot change whether a session is retained.
 History and prompt views are rendered from this same value. Prompt extraction
 must never reparse rendered Markdown.
 
+When several declared sources contain the same normalized identity, an exact
+role/text prefix is treated as an older append-only generation and the longest
+generation wins. Event timestamps do not distinguish generations because a
+harness may expose approximate assistant times. Any non-prefix role/text
+difference is reported as `DUPLICATE_SESSION_DIVERGENCE` and blocks
+publication through reconciliation.
+
 ## Decoder boundary
 
 A decoder receives a stable `SourceSnapshot` and returns `DecodeBatch`.

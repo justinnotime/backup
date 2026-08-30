@@ -196,6 +196,7 @@ class RootPolicy:
 class Discovery:
     mode: str
     patterns: tuple[str, ...]
+    superseded_sha256: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -447,7 +448,11 @@ def _source(value: Any, environ: Mapping[str, str]) -> SourceSpec:
     )
     discovery_cfg = _mapping(cfg["discovery"], "source.discovery")
     _required(discovery_cfg, {"mode", "patterns"}, "source.discovery")
-    _only(discovery_cfg, {"mode", "patterns"}, "source.discovery")
+    _only(
+        discovery_cfg,
+        {"mode", "patterns", "superseded_sha256"},
+        "source.discovery",
+    )
     discovery_mode = _enum(
         discovery_cfg["mode"], {"file", "glob"}, "source.discovery.mode"
     )
@@ -464,6 +469,21 @@ def _source(value: Any, environ: Mapping[str, str]) -> SourceSpec:
         for pattern in patterns
     ):
         raise ManifestError("candidate glob patterns must stay below their source root")
+    superseded_sha256 = _string_list(
+        discovery_cfg.get("superseded_sha256", []),
+        "source.discovery.superseded_sha256",
+    )
+    if any(
+        re.fullmatch(r"[0-9a-f]{64}", digest) is None
+        for digest in superseded_sha256
+    ):
+        raise ManifestError(
+            "source.discovery.superseded_sha256 must contain lowercase SHA-256 values"
+        )
+    if len(set(superseded_sha256)) != len(superseded_sha256):
+        raise ManifestError(
+            "source.discovery.superseded_sha256 values must be unique"
+        )
     decoder = _decoder_options(harness, cfg["decoder"])
     snapshot = _enum(
         cfg["snapshot"],
@@ -477,6 +497,10 @@ def _source(value: Any, environ: Mapping[str, str]) -> SourceSpec:
         raise ManifestError("OpenCode sources require a read-only SQLite snapshot")
     if harness != "opencode" and snapshot != "stable-bytes":
         raise ManifestError("only OpenCode sources may use SQLite snapshots")
+    if superseded_sha256 and snapshot != "stable-bytes":
+        raise ManifestError(
+            "superseded candidate hashes require stable-bytes snapshots"
+        )
     source_event = _mapping(cfg.get("event_policy", {}), "source.event_policy")
     _only(
         source_event,
@@ -512,7 +536,7 @@ def _source(value: Any, environ: Mapping[str, str]) -> SourceSpec:
         _label(cfg["output_node"], "source.output_node"),
         _root_policy(cfg["root_policy"]),
         snapshot,
-        Discovery(discovery_mode, patterns),
+        Discovery(discovery_mode, patterns, superseded_sha256),
         decoder,
         source_event,
         _bool(cfg["allow_empty"], "source.allow_empty"),
