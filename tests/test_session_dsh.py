@@ -144,7 +144,7 @@ def test_plain_v0_keeps_direct_user_and_final_model_text_only() -> None:
         ("user-like", "direct fixture"),
         ("assistant", "model fixture"),
     ]
-    assert batch.observations.recognizable_user_markers == 3
+    assert batch.observations.recognizable_user_markers == 1
     assert batch.observations.accepted_direct_user_events == 1
 
 

@@ -7,8 +7,10 @@ from pathlib import Path
 
 from test_session_core import session
 
-from agent_skills.sessions.audit import OutputInventory
+from agent_skills.sessions.audit import InventoryEntry, OutputInventory
 from agent_skills.sessions.model import (
+    CleanupAction,
+    Diagnostic,
     ExtractionSnapshot,
     FormatObservations,
     PublicationPlan,
@@ -18,6 +20,75 @@ from agent_skills.sessions.reconcile import reconcile_snapshot, write_failure_ma
 
 
 class ReconciliationTest(unittest.TestCase):
+    def test_duplicate_source_divergence_blocks_reconciliation(self) -> None:
+        current = session(session_id="session-diverged-id")
+        inventory = OutputInventory(
+            (
+                InventoryEntry(
+                    "History/current.md",
+                    "digest",
+                    current.identity,
+                    "history",
+                    {},
+                    "",
+                ),
+            )
+        )
+        snapshot = ExtractionSnapshot(
+            (current,),
+            (SourceOutcome("source-a", "node-a", "success", 1, 1),),
+            {"source-a": FormatObservations(accepted_direct_user_events=1)},
+            (
+                Diagnostic(
+                    "DUPLICATE_SESSION_DIVERGENCE",
+                    "source-a",
+                    current.session_id,
+                    2,
+                ),
+            ),
+        )
+
+        report = reconcile_snapshot(snapshot, inventory, PublicationPlan((), ()))
+
+        self.assertFalse(report.ok)
+        self.assertEqual(
+            [item.code for item in report.diagnostics],
+            ["DUPLICATE_SESSION_DIVERGENCE"],
+        )
+
+    def test_removing_one_duplicate_path_preserves_the_session_output(self) -> None:
+        current = session(session_id="session-migrated-id")
+        identity = current.identity
+        inventory = OutputInventory(
+            (
+                InventoryEntry(
+                    "History/legacy.md", "digest-a", identity, "history", {}, "",
+                ),
+                InventoryEntry(
+                    "History/2026-01/current.md",
+                    "digest-b",
+                    identity,
+                    "history",
+                    {},
+                    "",
+                ),
+            )
+        )
+        snapshot = ExtractionSnapshot(
+            (current,),
+            (SourceOutcome("source-a", "node-a", "success", 1, 1),),
+            {"source-a": FormatObservations(accepted_direct_user_events=1)},
+        )
+
+        report = reconcile_snapshot(
+            snapshot,
+            inventory,
+            PublicationPlan((), (CleanupAction("History/legacy.md", identity),)),
+        )
+
+        self.assertTrue(report.ok)
+        self.assertEqual(report.checks["missing_outputs"], 0)
+
     def test_missing_output_markers_and_unknown_formats_are_loud(self) -> None:
         current = session(session_id="session-visible-id")
         snapshot = ExtractionSnapshot(

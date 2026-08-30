@@ -29,21 +29,48 @@ def short_session_id(session_id: str) -> str:
     return cleaned[-12:] if len(cleaned) > 12 else cleaned
 
 
-def base_filename(session: Session) -> str:
-    return f"{date_for(session)}_{safe_component(session.project)}_{short_session_id(session.session_id)}.md"
+def base_filename(
+    session: Session, strategy: str = "project-session-suffix"
+) -> str:
+    if strategy == "project-session-suffix":
+        component = (
+            f"{safe_component(session.project)}_"
+            f"{short_session_id(session.session_id)}"
+        )
+    elif strategy == "session-prefix-8":
+        component = safe_component(session.session_id, limit=80)[:8]
+    elif strategy == "session-last-component-prefix-8":
+        component = safe_component(session.session_id.rsplit("-", 1)[-1])[:8]
+    elif strategy == "session-suffix-8":
+        component = safe_component(session.session_id, limit=80)[-8:]
+    elif strategy == "node-session-sha256-12":
+        component = hashlib.sha256(
+            f"{session.node_label}\0{session.session_id}".encode()
+        ).hexdigest()[:12]
+    else:
+        raise ValueError("unsupported filename strategy")
+    return f"{date_for(session)}_{component or 'unknown'}.md"
 
 
 def allocate_filenames(
     sessions: tuple[Session, ...],
+    *,
+    strategies: dict[tuple[str, str, str], str] | None = None,
+    destinations: dict[tuple[str, str, str], str] | None = None,
 ) -> dict[tuple[str, str, str], str]:
     """Allocate names from the complete set, independent of scan order."""
-    by_base: dict[str, list[Session]] = defaultdict(list)
+    strategies = strategies or {}
+    destinations = destinations or {}
+    by_base: dict[tuple[str, str], list[Session]] = defaultdict(list)
     for session in sessions:
-        by_base[base_filename(session)].append(session)
+        base = base_filename(
+            session, strategies.get(session.identity, "project-session-suffix")
+        )
+        by_base[(destinations.get(session.identity, ""), base)].append(session)
     allocated: dict[tuple[str, str, str], str] = {}
-    used: set[str] = set()
-    for base in sorted(by_base):
-        group = sorted(by_base[base], key=lambda item: item.identity)
+    used: set[tuple[str, str]] = set()
+    for destination, base in sorted(by_base):
+        group = sorted(by_base[(destination, base)], key=lambda item: item.identity)
         stem = base[:-3]
         harness_counts: dict[str, int] = defaultdict(int)
         for session in group:
@@ -58,9 +85,9 @@ def allocate_filenames(
                     f"{stem}--{safe_component(session.harness)}-"
                     f"{safe_component(session.node_label, limit=20)}.md"
                 )
-            if candidate in used:
+            if (destination, candidate) in used:
                 candidate = f"{stem}--{identity_digest(session.identity)}.md"
-            used.add(candidate)
+            used.add((destination, candidate))
             allocated[session.identity] = candidate
     return allocated
 

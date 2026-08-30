@@ -24,17 +24,119 @@ class ManifestTest(unittest.TestCase):
     def test_example_validates_against_formal_json_schema(self) -> None:
         schema = json.loads(
             (
-                REPOSITORY_ROOT / "agent-session-extraction/schemas/manifest-v1.json"
+                REPOSITORY_ROOT
+                / "skills/agent-session-extraction/schemas/manifest-v1.json"
             ).read_text(encoding="utf-8")
         )
         example = json.loads(
             (
                 REPOSITORY_ROOT
-                / "agent-session-extraction/references/manifest.example.json"
+                / "skills/agent-session-extraction/references/manifest.example.json"
             ).read_text(encoding="utf-8")
         )
         jsonschema.Draft202012Validator.check_schema(schema)
         jsonschema.validate(example, schema)
+
+        manifest = load_manifest(
+            REPOSITORY_ROOT
+            / "skills/agent-session-extraction/references/manifest.example.json",
+            environ={"HOME": "/synthetic/home"},
+        )
+        self.assertEqual(manifest.sources[1].snapshot, "sqlite-immutable")
+        self.assertEqual(
+            manifest.sources[0].event_policy["retention_mode"], "count-only"
+        )
+        self.assertEqual(
+            manifest.sources[0].decoder["grandfathered_malformed_line_sha256"], []
+        )
+        self.assertEqual(manifest.sources[2].decoder["minimum_total_events"], 2)
+        self.assertEqual(manifest.event_policy.retention_mode, "count-or-long")
+        self.assertEqual(manifest.project_policy.resolvers[0]["field"], "source_ref")
+        self.assertEqual(
+            manifest.project_policy.prompt_by_harness["openclaw"]["mode"],
+            "denylist",
+        )
+        self.assertEqual(
+            manifest.output.history_directory_by_harness,
+            {
+                "claude-code": "ClaudeHistory",
+                "opencode": "OpenCodeHistory",
+            },
+        )
+        self.assertEqual(
+            manifest.output.filename_strategy_by_harness["opencode"],
+            "node-session-sha256-12",
+        )
+        self.assertEqual(manifest.output.compatibility_rule, "legacy-agent-markdown/v1")
+        self.assertEqual(
+            manifest.publisher.key_link_target, "git-crypt/keys/default"
+        )
+
+    def test_formal_schema_rejects_invalid_manifest_extensions(self) -> None:
+        schema = json.loads(
+            (
+                REPOSITORY_ROOT
+                / "skills/agent-session-extraction/schemas/manifest-v1.json"
+            ).read_text(encoding="utf-8")
+        )
+        example = json.loads(
+            (
+                REPOSITORY_ROOT
+                / "skills/agent-session-extraction/references/manifest.example.json"
+            ).read_text(encoding="utf-8")
+        )
+        validator = jsonschema.Draft202012Validator(schema)
+
+        invalid_snapshot = json.loads(json.dumps(example))
+        invalid_snapshot["sources"][0]["snapshot"] = "sqlite-immutable"
+        self.assertTrue(tuple(validator.iter_errors(invalid_snapshot)))
+
+        invalid_strategy = json.loads(json.dumps(example))
+        invalid_strategy["output"]["filename_strategy"] = "consumer-specific"
+        self.assertTrue(tuple(validator.iter_errors(invalid_strategy)))
+
+        invalid_harness = json.loads(json.dumps(example))
+        invalid_harness["output"]["history_directory_by_harness"] = {
+            "private-harness": "PrivateHistory"
+        }
+        self.assertTrue(tuple(validator.iter_errors(invalid_harness)))
+
+        invalid_source_policy = json.loads(json.dumps(example))
+        invalid_source_policy["sources"][0]["event_policy"]["retention_mode"] = (
+            "implicit"
+        )
+        self.assertTrue(tuple(validator.iter_errors(invalid_source_policy)))
+
+        unnamed_resolver = json.loads(json.dumps(example))
+        unnamed_resolver["project_policy"]["resolvers"][0]["pattern"] = (
+            "^[^/]+/([^/]+)/"
+        )
+        self.assertTrue(tuple(validator.iter_errors(unnamed_resolver)))
+
+        invalid_prompt_policy = json.loads(json.dumps(example))
+        invalid_prompt_policy["project_policy"]["prompt_by_harness"][
+            "private-harness"
+        ] = {
+            "mode": "all",
+            "unknown": "keep",
+            "allowlist": [],
+            "denylist": [],
+        }
+        self.assertTrue(tuple(validator.iter_errors(invalid_prompt_policy)))
+
+        invalid_key_target = json.loads(json.dumps(example))
+        invalid_key_target["publisher"]["key_link"]["target"] = ".runtime/key"
+        self.assertTrue(tuple(validator.iter_errors(invalid_key_target)))
+
+        invalid_openclaw_minimum = json.loads(json.dumps(example))
+        invalid_openclaw_minimum["sources"][2]["decoder"]["minimum_total_events"] = 0
+        self.assertTrue(tuple(validator.iter_errors(invalid_openclaw_minimum)))
+
+        invalid_claude_hash = json.loads(json.dumps(example))
+        invalid_claude_hash["sources"][0]["decoder"][
+            "grandfathered_malformed_line_sha256"
+        ] = ["A" * 64]
+        self.assertTrue(tuple(validator.iter_errors(invalid_claude_hash)))
 
     def test_missing_or_invalid_manifest_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -89,6 +191,13 @@ class ManifestTest(unittest.TestCase):
             for decoder in (
                 {"unknown_option": True},
                 {"conversation_kind": False},
+                {"grandfathered_malformed_line_sha256": ["A" * 64]},
+                {
+                    "grandfathered_malformed_line_sha256": [
+                        "0" * 64,
+                        "0" * 64,
+                    ]
+                },
             ):
                 with self.subTest(decoder=decoder):
                     data = manifest_data(source, output, decoder=decoder)
@@ -261,6 +370,58 @@ class PathConfinementTest(unittest.TestCase):
 
 
 class PublisherManifestTest(unittest.TestCase):
+    def test_git_crypt_requires_git_worktree_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            source.mkdir()
+            output = root / "output"
+            output.mkdir()
+            key = root / "synthetic.key"
+            key.write_text("synthetic", encoding="utf-8")
+            for strategy in ("none", "filesystem-atomic"):
+                with self.subTest(strategy=strategy):
+                    data = manifest_data(source, output, publisher=strategy)
+                    data["publisher"]["encryption"] = "git-crypt"
+                    data["publisher"]["key_link"] = {
+                        "source": str(key),
+                        "target": "git-crypt/keys/default",
+                    }
+                    with self.assertRaises(ManifestError):
+                        load_manifest(
+                            write_manifest(root / "manifest.json", data),
+                            environ={"HOME": str(root)},
+                        )
+
+    def test_git_crypt_key_target_is_inside_private_git_key_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            source.mkdir()
+            output = root / "output"
+            output.mkdir()
+            key = root / "synthetic.key"
+            key.write_text("synthetic", encoding="utf-8")
+            for target in (
+                ".runtime/synthetic.key",
+                "git-crypt/default",
+                "git-crypt/keys/nested/name",
+                "git-crypt/keys/-unsafe",
+                "git-crypt/keys/name.with-dot",
+            ):
+                with self.subTest(target=target):
+                    data = manifest_data(source, output, publisher="git-worktree")
+                    data["publisher"]["encryption"] = "git-crypt"
+                    data["publisher"]["key_link"] = {
+                        "source": str(key),
+                        "target": target,
+                    }
+                    with self.assertRaises(ManifestError):
+                        load_manifest(
+                            write_manifest(root / "manifest.json", data),
+                            environ={"HOME": str(root)},
+                        )
+
     def test_owned_subtrees_must_not_overlap(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

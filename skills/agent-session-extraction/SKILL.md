@@ -28,11 +28,46 @@ Backup profile label.
 - Run `scripts/extract --manifest PATH` only when publication to the manifest's
   owned subtree is authorized. `git-worktree` publication also requires an
   explicit `--prepare-worktree PATH`; it stages but never commits or pushes.
+  `--output-root ABSOLUTE_PATH` overrides only the manifest's output repository
+  for that invocation, so a consumer can target its authorized disposable
+  checkout without rewriting source policy or the manifest on disk.
+
+For `git-crypt` publication, the key is linked into the throwaway worktree and
+is never copied. Its target is relative to that worktree's private Git
+directory: `git-crypt/keys/default` requires the `git-crypt` filter, while
+`git-crypt/keys/<name>` requires `git-crypt-<name>`. The publisher creates a
+no-checkout worktree, populates only its private index, validates cached
+attributes for every tracked owned file and planned write, and links the key
+before checkout can invoke a smudge filter. After checkout it refuses
+ciphertext, and after staging every planned write's index blob must carry the
+git-crypt ciphertext header without its planned plaintext. Any failure removes
+the throwaway worktree and leaves the source repository untouched.
+
+Because a throwaway worktree starts from `HEAD`, `git-worktree` publication
+requires every owned output subtree to match `HEAD` immediately before and
+after inventory is read. The same check runs again immediately before worktree
+preparation. Tracked changes, untracked files, ignored files,
+`skip-worktree`, and `assume-unchanged` state inside those subtrees fail
+closed. Repository dirt outside the owned subtrees remains allowed.
 
 Do not place real manifests, private patterns, account labels, host maps, or
 source paths in this shared package. Keep them with the consumer that owns
 them. A reconciliation or required-source failure blocks cleanup and
 publication.
+
+Use `sqlite-readonly` for a live or WAL-backed OpenCode database. Use
+`sqlite-immutable` only for a checkpointed snapshot whose producer guarantees
+immutability. Configure per-harness history directories and filename
+strategies in the manifest rather than adding consumer-specific render paths.
+Use a legacy compatibility rule only for an explicit migration; it does not
+relax the contract for newly written output.
+
+Parity adapters that already hold caller-frozen byte snapshots may import
+`decode_source_snapshots` from `agent_skills.sessions.api`. It applies the
+shared decoder, policy, normalization, and deduplication contract without
+source discovery, rendering, cleanup, or publication. It rejects direct-path
+snapshots; production extraction remains responsible for path validation and
+source revalidation.
 
 ## Contracts
 

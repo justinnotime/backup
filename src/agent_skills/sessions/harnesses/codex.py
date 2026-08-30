@@ -23,6 +23,9 @@ from ..model import (
 _DEFAULT_SYNTHETIC_PREFIXES = (
     "<environment_context>",
     "<permissions instructions>",
+    "<hook_prompt",
+    "<subagent_notification",
+    "<turn_aborted",
     "# AGENTS.md instructions",
 )
 _TITLE_TRAILER_RE = re.compile(
@@ -37,6 +40,7 @@ _KNOWN_IGNORED_EVENT_MESSAGES = {
     "token_count",
     "agent_reasoning",
     "reasoning",
+    "error",
 }
 _STREAM_PRIORITY = {"item_completed": 0, "legacy": 1, "response_item": 2}
 
@@ -181,10 +185,48 @@ def _lcs_pairs(
     return pairs
 
 
-def _merge_stream(base: list[DecodedEvent], supplement: Sequence[DecodedEvent]) -> int:
-    """Merge messages absent from ``base`` while preserving both stream orders."""
+def _merge_stream(
+    base: list[DecodedEvent], supplement: Sequence[DecodedEvent]
+) -> tuple[int, int]:
+    """Merge a provably compatible partial stream.
+
+    Exact role/text matches are anchors.  If both streams contain unmatched
+    events between the same pair of anchors, those events are competing
+    versions at one logical position rather than a one-sided omission.  Keep
+    the canonical stream unchanged and make that ambiguity visible instead of
+    concatenating both versions into the transcript.
+    """
+
+    keyed: list[dict[str, tuple[str, str]]] = []
+    duplicate_keys = 0
+    for stream in (base, supplement):
+        current: dict[str, tuple[str, str]] = {}
+        for event in stream:
+            if event.message_key is None:
+                continue
+            if event.message_key in current:
+                duplicate_keys += 1
+                continue
+            current[event.message_key] = _fingerprint(event)
+        keyed.append(current)
+    shared_keys = set(keyed[0]).intersection(keyed[1])
+    keyed_conflicts = sum(keyed[0][key] != keyed[1][key] for key in shared_keys)
+    if duplicate_keys or keyed_conflicts:
+        return 0, duplicate_keys + keyed_conflicts
 
     pairs = _lcs_pairs(base, supplement)
+    boundaries = [(-1, -1), *pairs, (len(base), len(supplement))]
+    conflicts = 0
+    for index in range(len(boundaries) - 1):
+        left, right = boundaries[index]
+        next_left, next_right = boundaries[index + 1]
+        left_gap = next_left - left - 1
+        right_gap = next_right - right - 1
+        if left_gap and right_gap:
+            conflicts += max(left_gap, right_gap)
+    if conflicts:
+        return 0, conflicts
+
     additions = 0
     previous_right = 0
     offset = 0
@@ -203,7 +245,7 @@ def _merge_stream(base: list[DecodedEvent], supplement: Sequence[DecodedEvent]) 
         insertion = last_left + 1 + offset if pairs else len(base)
         base[insertion:insertion] = tail
         additions += len(tail)
-    return additions
+    return additions, 0
 
 
 class CodexDecoder:
@@ -351,6 +393,8 @@ class CodexDecoder:
                             "codex.event_msg.item_completed.AgentMessage",
                             item,
                         )
+                    elif item_type in {"CollabAgentToolCall", "SubAgentActivity"}:
+                        recognized[f"event_msg.item_completed.ignored.{item_type}"] += 1
                     else:
                         recognized["event_msg.item_completed.ignored"] += 1
                         if any(
@@ -407,7 +451,13 @@ class CodexDecoder:
                 else:
                     recognized["response_item.ignored.other"] += 1
                 continue
-            if record_type in {"turn_context", "compacted", "event_msg_delta"}:
+            if record_type in {
+                "turn_context",
+                "compacted",
+                "event_msg_delta",
+                "world_state",
+                "inter_agent_communication_metadata",
+            }:
                 recognized[f"ignored.{record_type}"] += 1
             else:
                 unknown[str(record_type or "missing-type")] += 1
@@ -416,12 +466,15 @@ class CodexDecoder:
         diagnostics: list[Diagnostic] = []
         merged: list[DecodedEvent] = []
         additions = 0
+        divergences = 0
         if nonempty:
             nonempty.sort(key=lambda pair: (-len(pair[1]), _STREAM_PRIORITY[pair[0]]))
             canonical_name, canonical = nonempty[0]
             merged = list(canonical)
             for _, supplement in nonempty[1:]:
-                additions += _merge_stream(merged, supplement)
+                added, conflicts = _merge_stream(merged, supplement)
+                additions += added
+                divergences += conflicts
             if additions:
                 diagnostics.append(
                     Diagnostic(
@@ -429,6 +482,15 @@ class CodexDecoder:
                         snapshot.source_id,
                         session_id,
                         additions,
+                    )
+                )
+            if divergences:
+                diagnostics.append(
+                    Diagnostic(
+                        "CODEX_STREAM_DIVERGENCE",
+                        snapshot.source_id,
+                        session_id,
+                        divergences,
                     )
                 )
         else:
@@ -459,7 +521,9 @@ class CodexDecoder:
                     sum(unknown.values()),
                 )
             )
-        completeness = "incomplete" if malformed or unknown else "complete"
+        completeness = (
+            "incomplete" if malformed or unknown or divergences else "complete"
+        )
         if accepted_users == 0:
             if user_markers or unknown:
                 diagnostics.append(

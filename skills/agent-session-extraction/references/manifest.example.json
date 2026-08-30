@@ -1,0 +1,155 @@
+{
+  "schema_version": "agent-session-extraction-manifest/v1",
+  "node_label": "node-example",
+  "sources": [
+    {
+      "id": "claude-example",
+      "enabled": true,
+      "harness": "claude-code",
+      "path": {"kind": "explicit", "value": "/absolute/source/claude/projects"},
+      "authority": "owner",
+      "required": true,
+      "output_node": "node-example",
+      "root_policy": {
+        "allowed_lexical_roots": ["/absolute/source"],
+        "allowed_resolved_roots": ["/absolute/source"],
+        "forbidden_components": ["forbidden-profile"],
+        "required_suffixes": ["/claude/projects"],
+        "candidate_beneath_root": true,
+        "symlinks": "confined"
+      },
+      "snapshot": "stable-bytes",
+      "discovery": {"mode": "glob", "patterns": ["**/*.jsonl"]},
+      "decoder": {"grandfathered_malformed_line_sha256": []},
+      "event_policy": {
+        "min_direct_user_events": 2,
+        "min_user_chars": 24,
+        "retain_conversational_subagents": true,
+        "retention_mode": "count-only"
+      },
+      "allow_empty": false
+    },
+    {
+      "id": "opencode-snapshot-example",
+      "enabled": true,
+      "harness": "opencode",
+      "path": {"kind": "explicit", "value": "/absolute/source/opencode/snapshot.db"},
+      "authority": "mirror",
+      "required": true,
+      "output_node": "node-example",
+      "root_policy": {
+        "allowed_lexical_roots": ["/absolute/source/opencode"],
+        "allowed_resolved_roots": ["/absolute/source/opencode"],
+        "forbidden_components": ["forbidden-profile"],
+        "required_suffixes": ["/opencode/snapshot.db"],
+        "candidate_beneath_root": true,
+        "symlinks": "reject"
+      },
+      "snapshot": "sqlite-immutable",
+      "discovery": {"mode": "file", "patterns": []},
+      "decoder": {"minimum_user_events": 1, "excluded_cwd_prefixes": []},
+      "allow_empty": false
+    },
+    {
+      "id": "openclaw-example",
+      "enabled": true,
+      "harness": "openclaw",
+      "path": {"kind": "explicit", "value": "/absolute/source/openclaw/sessions"},
+      "authority": "owner",
+      "required": true,
+      "output_node": "node-example",
+      "root_policy": {
+        "allowed_lexical_roots": ["/absolute/source/openclaw"],
+        "allowed_resolved_roots": ["/absolute/source/openclaw"],
+        "forbidden_components": ["forbidden-profile"],
+        "required_suffixes": ["/openclaw/sessions"],
+        "candidate_beneath_root": true,
+        "symlinks": "confined"
+      },
+      "snapshot": "stable-bytes",
+      "discovery": {"mode": "glob", "patterns": ["*.jsonl"]},
+      "decoder": {"minimum_user_events": 1, "minimum_total_events": 2},
+      "allow_empty": false
+    }
+  ],
+  "ownership": {"mode": "owner"},
+  "event_policy": {
+    "synthetic_prefixes": ["<synthetic-context>"],
+    "peer_agent_prefixes": ["[peer from "],
+    "peer_agent_exact": ["check messages"],
+    "min_direct_user_events": 1,
+    "min_user_chars": 1,
+    "retain_conversational_subagents": false,
+    "retention_mode": "count-or-long"
+  },
+  "project_policy": {
+    "mode": "all",
+    "unknown": "keep",
+    "allowlist": [],
+    "denylist": [],
+    "aliases": {},
+    "resolvers": [
+      {
+        "source_ids": ["claude-example"],
+        "field": "source_ref",
+        "pattern": "^[^/]+/(?P<project>[^/]+)/"
+      }
+    ],
+    "prompt_by_harness": {
+      "claude-code": {
+        "mode": "allowlist",
+        "unknown": "drop",
+        "allowlist": ["synthetic-project"],
+        "denylist": []
+      },
+      "openclaw": {
+        "mode": "denylist",
+        "unknown": "keep",
+        "allowlist": [],
+        "denylist": ["synthetic-noise"]
+      }
+    }
+  },
+  "output": {
+    "repository_root": "/absolute/output/repository",
+    "history_directory": "SessionHistory",
+    "history_directory_by_harness": {
+      "claude-code": "ClaudeHistory",
+      "opencode": "OpenCodeHistory"
+    },
+    "prompt_directory": "SessionPrompts",
+    "layout": "monthly",
+    "migration": "none",
+    "filename_strategy": "project-session-suffix",
+    "filename_strategy_by_harness": {
+      "claude-code": "session-prefix-8",
+      "opencode": "node-session-sha256-12"
+    },
+    "prompt_max_chars": 1500,
+    "prompt_code_block_max_chars": 800,
+    "encryption_attributes": {},
+    "compatibility": {"rule_version": "legacy-agent-markdown/v1", "unchanged_sha256": []}
+  },
+  "transforms": {
+    "redaction": {"required": true, "builtin_policy": "default", "patterns": []}
+  },
+  "cleanup": {"scope": "owner"},
+  "indexes": {"mode": "none"},
+  "publisher": {
+    "strategy": "git-worktree",
+    "owned_subtrees": ["SessionHistory", "ClaudeHistory", "OpenCodeHistory", "SessionPrompts"],
+    "encryption": "git-crypt",
+    "key_link": {
+      "source": "/absolute/keys/session-output.key",
+      "target": "git-crypt/keys/default"
+    },
+    "ciphertext_checkout": "refuse"
+  },
+  "gates": {
+    "source_failure": "abort-required",
+    "require_redaction_self_test": true,
+    "require_output_audit": true,
+    "require_reconciliation": true,
+    "require_prepublication_scan": true
+  }
+}

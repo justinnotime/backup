@@ -386,15 +386,110 @@ def sqlite_snapshot(candidate: Path, source: SourceSpec, root: ValidatedRoot) ->
         os.close(descriptor)
 
 
+def _sqlite_immutable_token(
+    candidate: Path, source: SourceSpec, root: ValidatedRoot
+) -> tuple[int, ...]:
+    """Validate a checkpointed database for direct immutable SQLite access."""
+    descriptor = _open_read_only(candidate, "SQLite candidate")
+    wal = Path(f"{candidate}-wal")
+    journal = Path(f"{candidate}-journal")
+    wal_descriptor: int | None = None
+    try:
+        before = _validate_open_descriptor(candidate, descriptor, source, root)
+        if hasattr(os, "pread"):
+            header = os.pread(descriptor, 100, 0)
+        else:  # pragma: no cover - supported platforms expose pread
+            header = _read_descriptor(descriptor)[:100]
+        if not header.startswith(b"SQLite format 3\0"):
+            raise SourceAccessError("SQLite snapshot has an invalid header")
+        if os.path.lexists(journal):
+            raise SourceAccessError(
+                "SQLite rollback journal requires a stable snapshot"
+            )
+        wal_token: tuple[int, ...] = (0, 0, 0, 0, 0)
+        if os.path.lexists(wal):
+            wal_descriptor = _open_read_only(wal, "SQLite WAL sidecar")
+            wal_stat = _validate_sqlite_sidecar(
+                wal, wal_descriptor, source, candidate
+            )
+            if wal_stat.st_size:
+                raise SourceAccessError(
+                    "immutable SQLite access requires an empty WAL"
+                )
+            wal_token = (
+                1,
+                wal_stat.st_dev,
+                wal_stat.st_ino,
+                wal_stat.st_size,
+                wal_stat.st_mtime_ns,
+            )
+        after = os.fstat(descriptor)
+        _validate_open_descriptor(candidate, descriptor, source, root)
+        database_token = (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+        )
+        if database_token != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+        ):
+            raise SourceAccessError("SQLite candidate changed during validation")
+        if os.path.lexists(journal):
+            raise SourceAccessError("SQLite sidecar set changed during validation")
+        if bool(wal_token[0]) != os.path.lexists(wal):
+            raise SourceAccessError("SQLite sidecar set changed during validation")
+        return (*database_token, *wal_token)
+    finally:
+        if wal_descriptor is not None:
+            os.close(wal_descriptor)
+        os.close(descriptor)
+
+
+def sqlite_immutable_snapshot(
+    candidate: Path, source: SourceSpec, root: ValidatedRoot
+) -> tuple[int, ...]:
+    """Return a stability token for a checkpointed, immutable database.
+
+    This mode is intended for Backup-produced SQLite snapshots. SQLite opens
+    the validated database with ``mode=ro&immutable=1`` and therefore never
+    creates or updates source sidecars. The caller must revalidate the token
+    after decoding before accepting any session.
+    """
+    return _sqlite_immutable_token(candidate, source, root)
+
+
+def revalidate_snapshot(
+    snapshot: SourceSnapshot, source: SourceSpec, root: ValidatedRoot
+) -> None:
+    if snapshot.access_mode != "sqlite-immutable":
+        return
+    if snapshot.stability_token is None:
+        raise SourceAccessError("immutable SQLite snapshot has no stability token")
+    if (
+        _sqlite_immutable_token(snapshot.path, source, root)
+        != snapshot.stability_token
+    ):
+        raise SourceAccessError("SQLite source changed during decoding")
+
+
 def snapshot_candidate(
     source: SourceSpec, root: ValidatedRoot, candidate: Path
 ) -> SourceSnapshot:
     resolved, source_ref = validate_candidate(source, root, candidate)
-    payload = (
-        sqlite_snapshot(resolved, source, root)
-        if source.snapshot == "sqlite-readonly"
-        else stable_read(resolved, source, root)
-    )
+    access_mode = "bytes"
+    stability_token = None
+    if source.snapshot == "sqlite-readonly":
+        payload = sqlite_snapshot(resolved, source, root)
+    elif source.snapshot == "sqlite-immutable":
+        payload = None
+        access_mode = "sqlite-immutable"
+        stability_token = sqlite_immutable_snapshot(resolved, source, root)
+    else:
+        payload = stable_read(resolved, source, root)
     return SourceSnapshot(
         source.source_id,
         source.harness,  # type: ignore[arg-type]
@@ -403,4 +498,6 @@ def snapshot_candidate(
         resolved,
         payload,
         source.decoder,
+        access_mode,  # type: ignore[arg-type]
+        stability_token,
     )

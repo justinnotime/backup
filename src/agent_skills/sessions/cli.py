@@ -25,6 +25,7 @@ def _parser() -> argparse.ArgumentParser:
     extract.add_argument("--dry-run", action="store_true")
     extract.add_argument("--failure-marker", type=Path)
     extract.add_argument("--prepare-worktree", type=Path)
+    extract.add_argument("--output-root", type=Path)
 
     check = commands.add_parser(
         "doctor", help="check manifest, paths, and decoder capabilities"
@@ -52,6 +53,7 @@ def main(argv: list[str] | None = None) -> int:
                 dry_run=args.dry_run,
                 failure_marker=args.failure_marker,
                 git_worktree_destination=args.prepare_worktree,
+                output_root=args.output_root,
             )
             _emit(asdict(report))
             return 0

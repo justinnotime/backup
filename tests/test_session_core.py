@@ -8,7 +8,11 @@ from pathlib import Path
 
 from session_test_support import manifest_data, write_manifest
 
-from agent_skills.sessions.audit import OutputInventory, entry_from_content
+from agent_skills.sessions.audit import (
+    OutputInventory,
+    entry_from_content,
+    scan_inventory,
+)
 from agent_skills.sessions.cleanup import plan_cleanup
 from agent_skills.sessions.identity import allocate_filenames, relative_output_path
 from agent_skills.sessions.indexes import add_indexes
@@ -113,6 +117,32 @@ class NamingAndLayoutTest(unittest.TestCase):
             relative_output_path("History", "monthly", value, "x.md"),
             "History/2026-01/x.md",
         )
+
+    def test_configured_filename_strategies_match_stable_legacy_shapes(self) -> None:
+        claude = session(
+            harness="claude-code", session_id="12345678-abcd-0000-0000-000000000000"
+        )
+        codex = session(
+            harness="codex", session_id="12345678-abcd-0000-0000-fedcba987654"
+        )
+        opencode = session(harness="opencode", session_id="session-abcdefgh")
+        dsh = session(harness="dsh", session_id="complete-session-id")
+        values = (claude, codex, opencode, dsh)
+        strategies = {
+            claude.identity: "session-prefix-8",
+            codex.identity: "session-last-component-prefix-8",
+            opencode.identity: "session-suffix-8",
+            dsh.identity: "node-session-sha256-12",
+        }
+        names = allocate_filenames(
+            values,
+            strategies=strategies,
+            destinations={value.identity: value.harness for value in values},
+        )
+        self.assertEqual(names[claude.identity], "2026-01-02_12345678.md")
+        self.assertEqual(names[codex.identity], "2026-01-02_fedcba98.md")
+        self.assertEqual(names[opencode.identity], "2026-01-02_abcdefgh.md")
+        self.assertRegex(names[dsh.identity], r"^2026-01-02_[0-9a-f]{12}\.md$")
 
     def test_prompt_truncation_closes_bounded_code_block(self) -> None:
         value = "before\n```python\n" + ("x" * 400) + "\n```\nafter"
@@ -282,6 +312,160 @@ class PreservedOutputTest(unittest.TestCase):
             self.assertTrue(
                 all("/2026-01/" in item.relative_path for item in plan.writes)
             )
+
+    def test_harness_history_routes_are_configuration(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self._manifest(root)
+            manifest = replace(
+                manifest,
+                output=replace(
+                    manifest.output,
+                    history_directory_by_harness={
+                        "claude-code": "Claude-History",
+                        "codex": "Codex-History",
+                    },
+                    filename_strategy_by_harness={
+                        "claude-code": "session-prefix-8",
+                        "codex": "session-last-component-prefix-8",
+                    },
+                ),
+            )
+            values = (
+                session(
+                    harness="claude-code",
+                    session_id="12345678-0000-0000-0000-000000000000",
+                ),
+                session(
+                    harness="codex",
+                    session_id="12345678-0000-0000-0000-fedcba987654",
+                ),
+            )
+            snapshot = ExtractionSnapshot(
+                values,
+                (SourceOutcome("source-a", "node-a", "success", 2, 2),),
+                {},
+            )
+            plan = build_publication_plan(
+                manifest,
+                snapshot,
+                OutputInventory(()),
+                Redactor.from_spec(manifest.redaction),
+            )
+            paths = {item.relative_path for item in plan.writes}
+            self.assertIn("Claude-History/2026-01/2026-01-02_12345678.md", paths)
+            self.assertIn("Codex-History/2026-01/2026-01-02_fedcba98.md", paths)
+
+    def test_prompt_project_policy_does_not_remove_history(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self._manifest(root)
+            manifest = replace(
+                manifest,
+                project_policy=replace(
+                    manifest.project_policy,
+                    prompt_by_harness={
+                        "codex": {
+                            "mode": "allowlist",
+                            "unknown": "drop",
+                            "allowlist": ("another-project",),
+                            "denylist": (),
+                        }
+                    },
+                ),
+            )
+            current = session(harness="codex", project="demo")
+            snapshot = ExtractionSnapshot(
+                (current,),
+                (SourceOutcome("source-a", "node-a", "success", 1, 1),),
+                {},
+            )
+            plan = build_publication_plan(
+                manifest,
+                snapshot,
+                OutputInventory(()),
+                Redactor.from_spec(manifest.redaction),
+            )
+            self.assertEqual([item.kind for item in plan.writes], ["history"])
+
+    def test_legacy_markdown_is_adopted_in_place_without_bulk_rewrite(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            source.mkdir()
+            output = root / "output"
+            history = output / "Codex-History" / "2026-01"
+            prompts = output / "Prompts" / "2026-01"
+            history.mkdir(parents=True)
+            prompts.mkdir(parents=True)
+            filename = "2026-01-02_00000000.md"
+            (history / filename).write_text(
+                """# hello
+
+- Session ID: `session-000000000001`
+- Host: `node-a`
+- Project: `demo`
+- Tool: `codex`
+
+---
+
+### 2026-01-02 03:04:00Z — user
+
+> hello
+""",
+                encoding="utf-8",
+            )
+            (prompts / filename).write_text(
+                """# hello
+
+- Tool: codex
+- Project: demo
+- Host: node-a
+- Prompts: 1
+
+---
+
+### 2026-01-02 03:04:00Z
+
+hello
+
+---
+""",
+                encoding="utf-8",
+            )
+            data = manifest_data(source, output, cleanup="none")
+            data["output"]["history_directory"] = "Codex-History"
+            data["output"]["history_directory_by_harness"] = {
+                "codex": "Codex-History"
+            }
+            data["output"]["prompt_directory"] = "Prompts"
+            data["output"]["compatibility"]["rule_version"] = (
+                "legacy-agent-markdown/v1"
+            )
+            data["publisher"]["owned_subtrees"] = ["Codex-History", "Prompts"]
+            manifest = load_manifest(
+                write_manifest(root / "manifest.json", data),
+                environ={"HOME": str(root)},
+            )
+            inventory = scan_inventory(manifest)
+            current = session()
+            snapshot = ExtractionSnapshot(
+                (current,),
+                (SourceOutcome("source-a", "node-a", "success", 1, 1),),
+                {},
+            )
+            plan = build_publication_plan(
+                manifest,
+                snapshot,
+                inventory,
+                Redactor.from_spec(manifest.redaction),
+            )
+            self.assertEqual(plan.writes, ())
+            self.assertEqual(plan.removals, ())
+            identities = {
+                entry.identity for entry in inventory.entries if entry.identity
+            }
+            self.assertEqual(identities, {current.identity})
 
 
 if __name__ == "__main__":

@@ -30,7 +30,8 @@
         "peer_agent_exact": {"$ref": "#/$defs/strings"},
         "min_direct_user_events": {"type": "integer", "minimum": 1},
         "min_user_chars": {"type": "integer", "minimum": 1},
-        "retain_conversational_subagents": {"type": "boolean"}
+        "retain_conversational_subagents": {"type": "boolean"},
+        "retention_mode": {"$ref": "#/$defs/retentionMode"}
       }
     },
     "project_policy": {
@@ -41,7 +42,16 @@
         "unknown": {"enum": ["keep", "drop", "fail"]},
         "allowlist": {"$ref": "#/$defs/strings"},
         "denylist": {"$ref": "#/$defs/strings"},
-        "aliases": {"type": "object", "additionalProperties": {"type": "string"}}
+        "aliases": {"type": "object", "additionalProperties": {"type": "string"}},
+        "resolvers": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/projectResolver"}
+        },
+        "prompt_by_harness": {
+          "type": "object",
+          "propertyNames": {"enum": ["claude-code", "codex", "opencode", "dsh", "cursor", "openclaw"]},
+          "additionalProperties": {"$ref": "#/$defs/promptProjectPolicy"}
+        }
       }
     },
     "output": {"$ref": "#/$defs/output"},
@@ -77,9 +87,10 @@
         "required": {"type": "boolean"},
         "output_node": {"$ref": "#/$defs/label"},
         "root_policy": {"$ref": "#/$defs/rootPolicy"},
-        "snapshot": {"enum": ["stable-bytes", "sqlite-readonly"]},
+        "snapshot": {"enum": ["stable-bytes", "sqlite-readonly", "sqlite-immutable"]},
         "discovery": {"$ref": "#/$defs/discovery"},
         "decoder": {"type": "object"},
+        "event_policy": {"$ref": "#/$defs/sourceEventPolicy"},
         "allow_empty": {"type": "boolean"}
       },
       "allOf": [
@@ -93,7 +104,7 @@
         },
         {
           "if": {"properties": {"harness": {"const": "opencode"}}, "required": ["harness"]},
-          "then": {"properties": {"snapshot": {"const": "sqlite-readonly"}, "decoder": {"$ref": "#/$defs/opencodeDecoder"}}}
+          "then": {"properties": {"snapshot": {"enum": ["sqlite-readonly", "sqlite-immutable"]}, "decoder": {"$ref": "#/$defs/opencodeDecoder"}}}
         },
         {
           "if": {"properties": {"harness": {"const": "dsh"}}, "required": ["harness"]},
@@ -121,6 +132,46 @@
         "symlinks": {"enum": ["reject", "confined"]}
       }
     },
+    "retentionMode": {"enum": ["count-or-long", "count-only"]},
+    "sourceEventPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "min_direct_user_events": {"type": "integer", "minimum": 1},
+        "min_user_chars": {"type": "integer", "minimum": 1},
+        "retain_conversational_subagents": {"type": "boolean"},
+        "retention_mode": {"$ref": "#/$defs/retentionMode"}
+      }
+    },
+    "projectResolver": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_ids", "field", "pattern"],
+      "properties": {
+        "source_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/label"}
+        },
+        "field": {"enum": ["cwd", "source_ref", "project_hint"]},
+        "pattern": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\(\\?P<project>"
+        }
+      }
+    },
+    "promptProjectPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "unknown", "allowlist", "denylist"],
+      "properties": {
+        "mode": {"enum": ["all", "allowlist", "denylist"]},
+        "unknown": {"enum": ["keep", "drop", "fail"]},
+        "allowlist": {"$ref": "#/$defs/strings"},
+        "denylist": {"$ref": "#/$defs/strings"}
+      }
+    },
     "discovery": {
       "type": "object", "additionalProperties": false, "required": ["mode", "patterns"],
       "properties": {"mode": {"enum": ["file", "glob"]}, "patterns": {"$ref": "#/$defs/strings"}}
@@ -131,7 +182,12 @@
         "session_id": {"type": "string", "minLength": 1},
         "project_hint": {"type": "string", "minLength": 1},
         "conversation_kind": {"enum": ["main", "conversational-subagent"]},
-        "conversational_subagent_min_user_events": {"type": "integer", "minimum": 1}
+        "conversational_subagent_min_user_events": {"type": "integer", "minimum": 1},
+        "grandfathered_malformed_line_sha256": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
       }
     },
     "codexDecoder": {
@@ -169,6 +225,7 @@
         "session_id": {"type": "string", "minLength": 1},
         "project_hint": {"type": "string", "minLength": 1},
         "minimum_user_events": {"type": "integer", "minimum": 1},
+        "minimum_total_events": {"type": "integer", "minimum": 1},
         "is_cron_session": {"type": "boolean"},
         "operational_notification_prefixes": {"type": "array", "items": {"type": "string", "minLength": 1}},
         "channel_forward_prefixes": {"type": "array", "items": {"type": "string", "minLength": 1}},
@@ -187,20 +244,40 @@
       "properties": {
         "repository_root": {"$ref": "#/$defs/absolutePath"},
         "history_directory": {"$ref": "#/$defs/relativePath"},
+        "history_directory_by_harness": {
+          "type": "object",
+          "propertyNames": {"enum": ["claude-code", "codex", "opencode", "dsh", "cursor", "openclaw"]},
+          "additionalProperties": {"$ref": "#/$defs/relativePath"}
+        },
         "prompt_directory": {"$ref": "#/$defs/relativePath"},
         "layout": {"enum": ["flat", "monthly"]},
         "migration": {"enum": ["none", "flat-to-monthly"]},
+        "filename_strategy": {"$ref": "#/$defs/filenameStrategy"},
+        "filename_strategy_by_harness": {
+          "type": "object",
+          "propertyNames": {"enum": ["claude-code", "codex", "opencode", "dsh", "cursor", "openclaw"]},
+          "additionalProperties": {"$ref": "#/$defs/filenameStrategy"}
+        },
         "prompt_max_chars": {"type": "integer", "minimum": 64},
         "prompt_code_block_max_chars": {"type": "integer", "minimum": 16},
         "encryption_attributes": {"type": "object", "additionalProperties": {"type": "string"}},
         "compatibility": {
           "type": "object", "additionalProperties": false, "required": ["rule_version", "unchanged_sha256"],
           "properties": {
-            "rule_version": {"enum": ["none", "legacy-output/v1"]},
+            "rule_version": {"enum": ["none", "legacy-output/v1", "legacy-agent-markdown/v1"]},
             "unchanged_sha256": {"type": "array", "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
           }
         }
       }
+    },
+    "filenameStrategy": {
+      "enum": [
+        "project-session-suffix",
+        "session-prefix-8",
+        "session-last-component-prefix-8",
+        "session-suffix-8",
+        "node-session-sha256-12"
+      ]
     },
     "transforms": {
       "type": "object", "additionalProperties": false, "required": ["redaction"],
@@ -220,6 +297,18 @@
     },
     "publisher": {
       "type": "object", "additionalProperties": false, "required": ["strategy", "owned_subtrees", "encryption", "key_link", "ciphertext_checkout"],
+      "allOf": [
+        {
+          "if": {"properties": {"encryption": {"const": "git-crypt"}}},
+          "then": {
+            "properties": {
+              "strategy": {"const": "git-worktree"},
+              "key_link": {"type": "object"}
+            }
+          },
+          "else": {"properties": {"key_link": {"type": "null"}}}
+        }
+      ],
       "properties": {
         "strategy": {"enum": ["none", "filesystem-atomic", "git-worktree"]},
         "owned_subtrees": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/relativePath"}},
@@ -233,7 +322,10 @@
               "required": ["source", "target"],
               "properties": {
                 "source": {"$ref": "#/$defs/absolutePath"},
-                "target": {"$ref": "#/$defs/relativePath"}
+                "target": {
+                  "type": "string",
+                  "pattern": "^git-crypt/keys/[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+                }
               }
             }
           ]

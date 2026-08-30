@@ -24,6 +24,7 @@ RECONCILIATION_CODES = {
     "UNKNOWN_MESSAGE_FORMAT",
     "DECODER_CANARY_FAILED",
     "CODEX_STREAM_DIVERGENCE",
+    "DUPLICATE_SESSION_DIVERGENCE",
     "SOURCE_INVALID_OR_UNREADABLE",
     "DECODER_FAILURE",
 }
@@ -261,18 +262,17 @@ def reconcile_snapshot(
     inventory: OutputInventory,
     plan: PublicationPlan,
 ) -> ReconcileReport:
-    effective_history = {
-        entry.identity
+    effective_history_by_path = {
+        entry.relative_path: entry.identity
         for entry in inventory.entries
         if entry.kind == "history" and entry.identity is not None
     }
     for removal in plan.removals:
-        effective_history.discard(removal.identity)
-    effective_history.update(
-        planned.identity
-        for planned in plan.writes
-        if planned.kind == "history" and planned.identity is not None
-    )
+        effective_history_by_path.pop(removal.relative_path, None)
+    for planned in plan.writes:
+        if planned.kind == "history" and planned.identity is not None:
+            effective_history_by_path[planned.relative_path] = planned.identity
+    effective_history = set(effective_history_by_path.values())
     diagnostics = []
     for session in snapshot.sessions:
         if session.identity not in effective_history:

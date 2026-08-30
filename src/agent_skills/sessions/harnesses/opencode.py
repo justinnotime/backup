@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from datetime import UTC, datetime
+from urllib.parse import quote
 
 from ..model import (
     DecodeBatch,
@@ -47,6 +49,14 @@ class OpenCodeDecoder:
         return ("sqlite-read-only", "top-level-sessions", "text-parts")
 
     def _connect(self, snapshot: SourceSnapshot) -> sqlite3.Connection:
+        if snapshot.access_mode == "sqlite-immutable":
+            encoded = quote(os.fspath(snapshot.path), safe="/")
+            connection = sqlite3.connect(
+                f"file:{encoded}?mode=ro&immutable=1", uri=True
+            )
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA query_only = ON")
+            return connection
         if snapshot.payload is None:
             raise sqlite3.NotSupportedError("stable sqlite snapshot is required")
         connection = sqlite3.connect(":memory:")

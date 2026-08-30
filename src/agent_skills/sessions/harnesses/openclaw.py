@@ -81,7 +81,15 @@ class OpenClawDecoder:
             )
         options = snapshot.decoder_options
         minimum = options.get("minimum_user_events", 1)
-        if not isinstance(minimum, int) or isinstance(minimum, bool) or minimum < 1:
+        minimum_total = options.get("minimum_total_events", 1)
+        if (
+            not isinstance(minimum, int)
+            or isinstance(minimum, bool)
+            or minimum < 1
+            or not isinstance(minimum_total, int)
+            or isinstance(minimum_total, bool)
+            or minimum_total < 1
+        ):
             return DecodeBatch(
                 sessions=(),
                 completeness="invalid",
@@ -216,7 +224,7 @@ class OpenClawDecoder:
         direct_count = sum(event.role_hint == "user-like" for event in events)
         rejected: tuple[RejectedSession, ...] = ()
         sessions: tuple[DecodedSession, ...] = ()
-        if direct_count >= minimum:
+        if direct_count >= minimum and len(events) >= minimum_total:
             metadata: dict[str, Any] = {}
             if options.get("include_channel_metadata") is True:
                 channel = header.get("channel") or options.get("channel")
@@ -245,7 +253,12 @@ class OpenClawDecoder:
                 ),
             )
         else:
-            rejected = (RejectedSession(session_id, "NO_DIRECT_USER"),)
+            reason = (
+                "NO_DIRECT_USER"
+                if direct_count < minimum
+                else "BELOW_MINIMUM_TOTAL_EVENTS"
+            )
+            rejected = (RejectedSession(session_id, reason),)
 
         diagnostics = ()
         completeness = "complete"

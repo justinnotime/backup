@@ -1,8 +1,9 @@
-# Agent Harness State Backup
+# Shared Agent Harness Skills
 
-A self-contained backup module for Claude Code, Codex, OpenCode, DeepSeek
-Harness, OpenClaw, and Cursor. It copies selected local state into one
-machine-scoped tree that can be synchronized with Syncthing.
+This repository retains its `backup` name and stable backup entrypoints while
+growing into a collection of deterministic agent-harness Skills. It contains a
+state backup, Syncthing diagnostics, a remote clipboard helper, and a shared
+session-extraction runtime.
 
 The repository works in both shapes:
 
@@ -16,11 +17,21 @@ trust semantics to them.
 
 | Path | Purpose |
 |---|---|
-| `backup.sh` | Stable backup entrypoint retained for existing jobs and links |
+| `skills/` | Installable deterministic behavior packages |
+| `skills/state-backup/` | State-backup Skill and canonical backup script |
+| `backup.sh` | Stable compatibility link retained for existing jobs and links |
+| `skills/syncthing-doctor/` | Syncthing diagnostic Skill and canonical doctor script |
 | `PROFILES.md` | Backup source-root, destination, exclusion, and upgrade contract |
-| `syncthing-doctor.sh` | Syncthing process, folder, and ignore-pattern diagnostics |
-| `clip.sh` | Optional remote-to-local clipboard shell helper |
+| `syncthing-doctor.sh` | Stable compatibility link for Syncthing diagnostics |
+| `skills/remote-clipboard/` | Remote-to-local clipboard Skill and shell function |
+| `clip.sh` | Stable compatibility link for the clipboard shell helper |
+| `skills/agent-session-extraction/` | Manifest-driven extraction Skill and command wrappers |
+| `src/agent_skills/sessions/` | Shared normalized-session runtime |
 | `tests/run.sh` | Default-only and legacy multi-root compatibility checks |
+
+The three root shell paths are relative symbolic links into their Skill
+packages. This keeps existing scheduler and shell configuration working while
+making each implementation part of its behavior package.
 
 ## Backup layout
 
@@ -134,6 +145,10 @@ tests/run.sh
 ```
 
 Then run the existing backup command manually and inspect its log.
+
+Session-extraction development additionally uses the Python tests declared in
+`pyproject.toml`. Validate every new or changed Skill with the repository's
+Skill validator before publishing it.
 
 ## Clipboard helper
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 from .audit import OutputInventory, entry_from_content
 from .manifest import Manifest
 from .model import PlannedFile, PublicationPlan
@@ -67,17 +69,25 @@ def add_indexes(
                 planned.relative_path, planned.content
             )
     writes = [item for item in plan.writes if item.kind != "index"]
-    for kind, directory, entry_kind in (
-        ("history", manifest.output.history_directory, "history"),
-        ("prompts", manifest.output.prompt_directory, "prompts"),
-    ):
-        entries = [entry for entry in effective.values() if entry.kind == entry_kind]
-        writes.append(
-            PlannedFile(
-                f"{directory}/README.md",
-                _render_index(kind, directory, entries),
-                None,
-                "index",
+    views = [
+        ("history", directory, "history")
+        for directory in manifest.output.history_directories()
+    ]
+    views.append(("prompts", manifest.output.prompt_directory, "prompts"))
+    for kind, directory, entry_kind in views:
+        entries = [
+            entry
+            for entry in effective.values()
+            if entry.kind == entry_kind
+            and (
+                entry_kind != "history"
+                or entry.relative_path.startswith(directory + "/")
             )
-        )
+        ]
+        relative_path = f"{directory}/README.md"
+        content = _render_index(kind, directory, entries)
+        prior = effective.get(relative_path)
+        if prior is not None and prior.digest == hashlib.sha256(content).hexdigest():
+            continue
+        writes.append(PlannedFile(relative_path, content, None, "index"))
     return PublicationPlan(tuple(writes), plan.removals, plan.diagnostics)

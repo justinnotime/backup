@@ -160,6 +160,8 @@ class SourceSnapshot:
     path: Path
     payload: bytes | None
     decoder_options: Mapping[str, Any] = field(default_factory=dict)
+    access_mode: Literal["bytes", "sqlite-immutable"] = "bytes"
+    stability_token: tuple[int, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)

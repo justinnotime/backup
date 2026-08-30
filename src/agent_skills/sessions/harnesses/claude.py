@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections import Counter
@@ -52,22 +53,44 @@ def _parse_timestamp(value: Any) -> datetime | None:
     return parsed.astimezone(UTC)
 
 
-def _jsonl(payload: bytes) -> tuple[list[tuple[int, Mapping[str, Any]]], int]:
+def _jsonl(
+    payload: bytes, grandfathered_malformed_sha256: frozenset[str]
+) -> tuple[list[tuple[int, Mapping[str, Any]]], int, int]:
     records: list[tuple[int, Mapping[str, Any]]] = []
     malformed = 0
+    grandfathered = 0
     for sequence, raw_line in enumerate(payload.splitlines()):
         if not raw_line.strip():
             continue
         try:
             value = json.loads(raw_line)
         except (UnicodeDecodeError, json.JSONDecodeError):
-            malformed += 1
+            digest = hashlib.sha256(raw_line).hexdigest()
+            if digest in grandfathered_malformed_sha256:
+                grandfathered += 1
+            else:
+                malformed += 1
             continue
         if isinstance(value, dict):
             records.append((sequence, value))
         else:
             malformed += 1
-    return records, malformed
+    return records, malformed, grandfathered
+
+
+def _grandfathered_malformed_hashes(
+    options: Mapping[str, Any],
+) -> frozenset[str] | None:
+    value = options.get("grandfathered_malformed_line_sha256", ())
+    if not isinstance(value, (list, tuple)):
+        return None
+    if any(
+        not isinstance(item, str) or not re.fullmatch(r"[0-9a-f]{64}", item)
+        for item in value
+    ):
+        return None
+    result = frozenset(value)
+    return result if len(result) == len(value) else None
 
 
 def _slash_command(text: str) -> str | None:
@@ -102,6 +125,31 @@ def _assistant_text(content: Any) -> str:
 def _message_content(record: Mapping[str, Any]) -> Any:
     message = record.get("message")
     return message.get("content") if isinstance(message, dict) else None
+
+
+def _user_text_blocks(content: Any) -> str:
+    if not isinstance(content, list):
+        return ""
+    return "\n".join(
+        block["text"]
+        for block in content
+        if isinstance(block, dict)
+        and block.get("type") == "text"
+        and isinstance(block.get("text"), str)
+        and block["text"].strip()
+    ).strip()
+
+
+def _has_unknown_direct_text_shape(content: Any) -> bool:
+    if isinstance(content, dict):
+        return isinstance(content.get("text"), str) and bool(content["text"].strip())
+    return isinstance(content, list) and any(
+        isinstance(block, dict)
+        and block.get("type") == "input_text"
+        and isinstance(block.get("text"), str)
+        and bool(block["text"].strip())
+        for block in content
+    )
 
 
 def _message_key(record: Mapping[str, Any]) -> str | None:
@@ -165,10 +213,26 @@ class ClaudeDecoder:
                 ),
             )
 
-        records, malformed = _jsonl(snapshot.payload)
         options = snapshot.decoder_options
+        grandfathered_hashes = _grandfathered_malformed_hashes(options)
+        if grandfathered_hashes is None:
+            return DecodeBatch(
+                sessions=(),
+                completeness="invalid",
+                diagnostics=(
+                    Diagnostic(
+                        "CLAUDE_INVALID_GRANDFATHERED_MALFORMED_HASHES",
+                        snapshot.source_id,
+                    ),
+                ),
+            )
+        records, malformed, grandfathered = _jsonl(
+            snapshot.payload, grandfathered_hashes
+        )
         prefixes = _option_prefixes(options)
         recognized: Counter[str] = Counter()
+        if grandfathered:
+            recognized["ignored.grandfathered-malformed-line"] = grandfathered
         unknown: Counter[str] = Counter()
         session_id = next(
             (
@@ -209,22 +273,28 @@ class ClaudeDecoder:
                     ),
                 ),
             )
+        if conversation_kind == "conversational-subagent":
+            # Claude records the parent session ID inside subagent rows. The
+            # complete child identity is the stable transcript filename.
+            session_id = PurePosixPath(snapshot.source_ref).name.removesuffix(".jsonl")
+        main_session = conversation_kind == "main"
 
-        # Count only user records that can themselves become retained events.
-        # Sidechain and non-command metadata echoes must not hide the sole copy
-        # of an enqueued prompt.
-        direct_text_counts = Counter(
-            content.strip()
+        # Claude may record one queued command both as queue-operation and as a
+        # user-shaped echo. Every user string participates in this duplicate
+        # check, including sidechain and metadata echoes; those echoes are not
+        # retained, and their queued copy must not leak back into the transcript.
+        direct_user_texts = {
+            text
             for _, record in records
-            if record.get("type") == "user" and not record.get("isSidechain")
+            if record.get("type") == "user"
             for content in (_message_content(record),)
-            if isinstance(content, str)
-            and content.strip()
-            and (
-                _slash_command(content) is not None
-                or (not record.get("isMeta") and _is_real_user_text(content, prefixes))
+            for text in (
+                content.strip()
+                if isinstance(content, str)
+                else _user_text_blocks(content),
             )
-        )
+            if text
+        }
         events: list[DecodedEvent] = []
         queues: list[tuple[int, Mapping[str, Any], str]] = []
         user_markers = 0
@@ -236,17 +306,35 @@ class ClaudeDecoder:
             quality = "exact" if timestamp is not None else "unknown"
             if record_type == "user":
                 recognized["user"] += 1
-                user_markers += 1
                 content = _message_content(record)
-                if record.get("isSidechain"):
+                raw_kind = "claude.user"
+                if main_session and record.get("isSidechain"):
                     continue
                 slash = _slash_command(content) if isinstance(content, str) else None
                 if slash is not None:
+                    user_markers += 1
                     text = slash
-                elif record.get("isMeta"):
+                elif main_session and record.get("isMeta"):
                     continue
-                elif _is_real_user_text(content, prefixes):
-                    text = content.strip()
+                elif isinstance(content, str) and content.strip():
+                    if _is_real_user_text(content, prefixes):
+                        user_markers += 1
+                        text = content.strip()
+                    else:
+                        recognized["user.synthetic"] += 1
+                        continue
+                elif block_text := _user_text_blocks(content):
+                    if _is_real_user_text(block_text, prefixes):
+                        user_markers += 1
+                        text = block_text
+                        raw_kind = "claude.user.text-blocks"
+                    else:
+                        recognized["user.synthetic"] += 1
+                        continue
+                elif _has_unknown_direct_text_shape(content):
+                    user_markers += 1
+                    unknown["user.unknown-text-content"] += 1
+                    continue
                 else:
                     continue
                 events.append(
@@ -256,14 +344,16 @@ class ClaudeDecoder:
                         timestamp_quality=quality,
                         role_hint="user-like",
                         text=text,
-                        raw_kind="claude.user",
+                        raw_kind=raw_kind,
                         message_key=_message_key(record),
                     )
                 )
                 accepted_users += 1
             elif record_type == "assistant":
                 recognized["assistant"] += 1
-                if record.get("isSidechain") or record.get("isMeta"):
+                if main_session and (
+                    record.get("isSidechain") or record.get("isMeta")
+                ):
                     continue
                 text = _assistant_text(_message_content(record))
                 if text:
@@ -283,25 +373,38 @@ class ClaudeDecoder:
                     recognized["queue-operation.ignored"] += 1
                     continue
                 recognized["queue-operation.enqueue"] += 1
-                user_markers += 1
                 content = record.get("content")
-                if _is_real_user_text(content, prefixes):
-                    queues.append((sequence, record, content.strip()))
+                if isinstance(content, str) and content.strip():
+                    if _is_real_user_text(content, prefixes):
+                        queues.append((sequence, record, content.strip()))
+                    else:
+                        recognized["queue-operation.synthetic"] += 1
             elif record_type in {
                 "summary",
                 "system",
                 "progress",
                 "attachment",
                 "file-history-snapshot",
+                "ai-title",
+                "agent-setting",
+                "atis-latch",
+                "cost-state",
+                "file-history-delta",
+                "last-prompt",
+                "mode",
+                "permission-mode",
+                "pr-link",
+                "relocated",
+                "worktree-state",
             }:
                 recognized[f"ignored.{record_type}"] += 1
             else:
                 unknown[str(record_type or "missing-type")] += 1
 
         for sequence, record, text in queues:
-            if direct_text_counts[text] > 0:
-                direct_text_counts[text] -= 1
+            if text in direct_user_texts:
                 continue
+            user_markers += 1
             timestamp = _parse_timestamp(record.get("timestamp"))
             events.append(
                 DecodedEvent(
@@ -315,8 +418,15 @@ class ClaudeDecoder:
                 )
             )
             accepted_users += 1
+            direct_user_texts.add(text)
 
-        events.sort(key=lambda event: event.source_sequence)
+        events.sort(
+            key=lambda event: (
+                event.timestamp is None,
+                event.timestamp or datetime.min.replace(tzinfo=UTC),
+                event.source_sequence,
+            )
+        )
         observations = FormatObservations(
             recognized_record_counts=dict(sorted(recognized.items())),
             unknown_record_counts={

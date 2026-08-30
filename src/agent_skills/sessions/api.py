@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 
-from .manifest import Manifest, load_manifest
+from .manifest import Manifest, ManifestError, load_manifest
 from .model import Diagnostic, ReconcileReport, RunReport
-from .pipeline import PipelineError, evaluate_pipeline, extract_sessions, run_pipeline
+from .pipeline import (
+    PipelineError,
+    decode_source_snapshots,
+    evaluate_pipeline,
+    extract_sessions,
+    run_pipeline,
+)
 from .reconcile import clear_failure_marker, write_failure_marker
 from .redact import Redactor
 from .sources import SourceAccessError, validate_configured_path
@@ -28,8 +35,16 @@ def run(
     environ: Mapping[str, str] | None = None,
     failure_marker: Path | None = None,
     git_worktree_destination: Path | None = None,
+    output_root: Path | None = None,
 ) -> RunReport:
     manifest = load_manifest(manifest_path, environ=_environment(environ))
+    if output_root is not None:
+        if not output_root.is_absolute():
+            raise ManifestError("output root override must be absolute")
+        manifest = replace(
+            manifest,
+            output=replace(manifest.output, repository_root=output_root),
+        )
     try:
         report, _snapshot, _plan = run_pipeline(
             manifest,
@@ -109,6 +124,7 @@ def reconcile(
 __all__ = [
     "Manifest",
     "PipelineError",
+    "decode_source_snapshots",
     "doctor",
     "extract_sessions",
     "load_manifest",

@@ -418,6 +418,12 @@ def _packed_row_length(record: Mapping[str, Any], expected_seq: int) -> int:
     return len(payload)
 
 
+def _record_start_sequence(record: Mapping[str, Any]) -> object:
+    if record.get("type") in PACKED_ROW_TYPES:
+        return record.get("seq0")
+    return record.get("seq")
+
+
 def _tool_result_rewrite_is_valid(
     record: Mapping[str, Any],
     shadowed: list[int],
@@ -613,9 +619,40 @@ class DshDecoder:
         event_records: dict[int, Mapping[str, Any]] = {}
         events: list[DecodedEvent] = []
         seen_messages: set[str] = set()
+        pending_seed_rollback: tuple[int, int, bool, DecodedEvent | None] | None = None
 
-        for record in records[1:]:
+        for record_index, record in enumerate(records[1:], start=1):
             record_type = record.get("type")
+            record_start = _record_start_sequence(record)
+            if record_start != expected_seq and pending_seed_rollback is not None:
+                (
+                    restart_seq,
+                    boundary_user_seq,
+                    boundary_is_direct,
+                    boundary_event,
+                ) = pending_seed_rollback
+                if record_type != "assistant/chunk" or record_start != restart_seq:
+                    return self._failure(snapshot, "DSH_EVENT_INVALID", "invalid")
+                expected_seq = restart_seq
+                surface_nodes = [
+                    sequence
+                    for sequence in surface_nodes
+                    if sequence <= boundary_user_seq
+                ]
+                event_records = {
+                    sequence: prior
+                    for sequence, prior in event_records.items()
+                    if sequence <= boundary_user_seq
+                }
+                events = [boundary_event] if boundary_event is not None else []
+                seen_messages = (
+                    {boundary_event.message_key}
+                    if boundary_event is not None
+                    else set()
+                )
+                user_markers = 1 if boundary_is_direct else 0
+                accepted = 1 if boundary_event is not None else 0
+            pending_seed_rollback = None
             if isinstance(record_type, str) and record_type in PACKED_ROW_TYPES:
                 count = _packed_row_length(record, expected_seq)
                 if not count:
@@ -644,14 +681,67 @@ class DshDecoder:
             event_records[expected_seq] = record
             expected_seq += 1
             seq = record["seq"]
-            if record_type == "user/message":
-                user_markers += 1
+            if record_type == "session/end-seed":
+                if (
+                    set(record) != {"type", "seq", "time", "data"}
+                    or record["data"] != {}
+                ):
+                    return self._failure(snapshot, "DSH_EVENT_INVALID", "invalid")
+                prior = records[record_index - 3 : record_index]
+                if (
+                    "seedLength" not in header
+                    and len(prior) == 3
+                    and tuple(item.get("type") for item in prior)
+                    == ("user/message", "step/end", "turn/end")
+                ):
+                    boundary_user_seq = prior[0].get("seq")
+                    if (
+                        _safe_nonnegative_integer(boundary_user_seq)
+                        and prior[1].get("seq") == boundary_user_seq + 1
+                        and prior[2].get("seq") == boundary_user_seq + 2
+                        and seq == boundary_user_seq + 3
+                        and isinstance(prior[0].get("data"), dict)
+                    ):
+                        boundary_is_direct = (
+                            _source_kind(prior[0]["data"]) == "user"
+                        )
+                        boundary_event = next(
+                            (
+                                event
+                                for event in reversed(events)
+                                if event.source_sequence == boundary_user_seq
+                                and event.role_hint == "user-like"
+                            ),
+                            None,
+                        )
+                        pending_seed_rollback = (
+                            boundary_user_seq + 1,
+                            boundary_user_seq,
+                            boundary_is_direct,
+                            boundary_event,
+                        )
+                # A marker is authoritative over an absent legacy
+                # ``seedLength``. Preserve only the boundary user if the next
+                # record proves the one supported rollback shape; otherwise
+                # every event before the marker is inherited seed history.
+                if "seedLength" not in header:
+                    events = []
+                    seen_messages = set()
+                    user_markers = 0
+                    accepted = 0
+                continue
             if seq < seed_length or record.get("surfaceOp") != "append":
                 continue
 
             data = record["data"]
             message: Mapping[str, Any] | None = None
             role_hint = "user-like"
+            if (
+                record_type == "user/message"
+                and isinstance(data, dict)
+                and _source_kind(data) == "user"
+            ):
+                user_markers += 1
             if (
                 record_type == "user/message"
                 and isinstance(data, dict)

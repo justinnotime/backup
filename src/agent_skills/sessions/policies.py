@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import PurePath
 
 from .manifest import Manifest, SourceSpec
@@ -18,7 +19,27 @@ class PolicyError(RuntimeError):
     pass
 
 
-def _project(decoded: DecodedSession) -> str:
+def _project(
+    decoded: DecodedSession,
+    *,
+    manifest: Manifest,
+    source: SourceSpec,
+    source_ref: str,
+) -> str:
+    values = {
+        "cwd": decoded.cwd,
+        "source_ref": source_ref,
+        "project_hint": decoded.project_hint,
+    }
+    for resolver in manifest.project_policy.resolvers:
+        if source.source_id not in resolver["source_ids"]:
+            continue
+        value = values[resolver["field"]]
+        if not value:
+            continue
+        match = re.search(resolver["pattern"], value)
+        if match is not None and match.group("project").strip():
+            return match.group("project").strip()
     if decoded.project_hint and decoded.project_hint.strip():
         return decoded.project_hint.strip()
     if decoded.cwd:
@@ -36,9 +57,12 @@ def normalize_decoded(
     source_ref: str,
 ) -> Session | None:
     policy = manifest.event_policy
+    retain_conversational_subagents = source.event_policy.get(
+        "retain_conversational_subagents", policy.retain_conversational_subagents
+    )
     if (
         decoded.conversation_kind == "conversational-subagent"
-        and not policy.retain_conversational_subagents
+        and not retain_conversational_subagents
     ):
         return None
 
@@ -56,14 +80,25 @@ def normalize_decoded(
 
     # This decision precedes peer-agent relabeling. A policy change in role
     # attribution therefore cannot silently remove a session.
-    if (
-        len(user_like) < policy.min_direct_user_events
-        and max((len(event.text) for event in user_like), default=0)
-        < policy.min_user_chars
-    ):
+    min_direct_user_events = source.event_policy.get(
+        "min_direct_user_events", policy.min_direct_user_events
+    )
+    min_user_chars = source.event_policy.get("min_user_chars", policy.min_user_chars)
+    retention_mode = source.event_policy.get("retention_mode", policy.retention_mode)
+    below_count = len(user_like) < min_direct_user_events
+    below_length = (
+        max((len(event.text) for event in user_like), default=0) < min_user_chars
+    )
+    if below_count and (retention_mode == "count-only" or below_length):
         return None
 
-    project = manifest.project_policy.aliases.get(_project(decoded), _project(decoded))
+    resolved_project = _project(
+        decoded,
+        manifest=manifest,
+        source=source,
+        source_ref=source_ref,
+    )
+    project = manifest.project_policy.aliases.get(resolved_project, resolved_project)
     if project == "unknown":
         if manifest.project_policy.unknown == "drop":
             return None
@@ -120,6 +155,22 @@ def normalize_decoded(
         tuple(events),
         metadata,
     )
+
+
+def prompt_project_allowed(manifest: Manifest, session: Session) -> bool:
+    configured = manifest.project_policy.prompt_by_harness.get(session.harness)
+    if configured is None:
+        return True
+    if session.project == "unknown":
+        if configured["unknown"] == "drop":
+            return False
+        if configured["unknown"] == "fail":
+            raise PolicyError("prompt project is unknown")
+    if configured["mode"] == "allowlist":
+        return session.project in configured["allowlist"]
+    if configured["mode"] == "denylist":
+        return session.project not in configured["denylist"]
+    return True
 
 
 def deduplicate_sessions(

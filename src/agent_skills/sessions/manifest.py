@@ -18,6 +18,7 @@ class ManifestError(ValueError):
 
 
 _LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_GIT_CRYPT_KEY_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _TOP_KEYS = {
     "schema_version",
     "node_label",
@@ -44,8 +45,10 @@ _SOURCE_KEYS = {
     "snapshot",
     "discovery",
     "decoder",
+    "event_policy",
     "allow_empty",
 }
+_SOURCE_OPTIONAL_KEYS = {"event_policy"}
 _NATIVE_DEFAULTS = {
     "claude-code": ".claude/projects",
     "codex": ".codex/sessions",
@@ -60,6 +63,7 @@ _HARNESS_DECODER_KEYS = {
     | {
         "conversation_kind",
         "conversational_subagent_min_user_events",
+        "grandfathered_malformed_line_sha256",
     },
     "codex": _COMMON_DECODER_KEYS,
     "opencode": {"minimum_user_events", "excluded_cwd_prefixes"},
@@ -68,6 +72,7 @@ _HARNESS_DECODER_KEYS = {
     "openclaw": _COMMON_DECODER_KEYS
     | {
         "minimum_user_events",
+        "minimum_total_events",
         "is_cron_session",
         "operational_notification_prefixes",
         "channel_forward_prefixes",
@@ -163,6 +168,20 @@ def _relative(value: Any, name: str) -> str:
     return str(path)
 
 
+def _git_crypt_key_target(value: Any) -> str:
+    target = _relative(value, "publisher.key_link.target")
+    parts = PurePosixPath(target).parts
+    if (
+        len(parts) != 3
+        or parts[:2] != ("git-crypt", "keys")
+        or _GIT_CRYPT_KEY_NAME.fullmatch(parts[2]) is None
+    ):
+        raise ManifestError(
+            "publisher.key_link.target must name git-crypt/keys/<safe-name>"
+        )
+    return target
+
+
 @dataclass(frozen=True, slots=True)
 class RootPolicy:
     allowed_lexical_roots: tuple[Path, ...]
@@ -193,6 +212,7 @@ class SourceSpec:
     snapshot: str
     discovery: Discovery
     decoder: Mapping[str, Any]
+    event_policy: Mapping[str, Any]
     allow_empty: bool
 
 
@@ -204,6 +224,7 @@ class EventPolicy:
     min_direct_user_events: int
     min_user_chars: int
     retain_conversational_subagents: bool
+    retention_mode: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,20 +234,41 @@ class ProjectPolicy:
     allowlist: tuple[str, ...]
     denylist: tuple[str, ...]
     aliases: Mapping[str, str]
+    resolvers: tuple[Mapping[str, Any], ...]
+    prompt_by_harness: Mapping[str, Mapping[str, Any]]
 
 
 @dataclass(frozen=True, slots=True)
 class OutputSpec:
     repository_root: Path
     history_directory: str
+    history_directory_by_harness: Mapping[str, str]
     prompt_directory: str
     layout: str
     migration: str
+    filename_strategy: str
+    filename_strategy_by_harness: Mapping[str, str]
     prompt_max_chars: int
     prompt_code_block_max_chars: int
     encryption_attributes: Mapping[str, str]
     compatibility_rule: str
     compatibility_sha256: tuple[str, ...]
+
+    def history_directory_for(self, harness: str) -> str:
+        return self.history_directory_by_harness.get(harness, self.history_directory)
+
+    def history_directories(self) -> tuple[str, ...]:
+        return tuple(
+            sorted(
+                {
+                    self.history_directory,
+                    *self.history_directory_by_harness.values(),
+                }
+            )
+        )
+
+    def filename_strategy_for(self, harness: str) -> str:
+        return self.filename_strategy_by_harness.get(harness, self.filename_strategy)
 
 
 @dataclass(frozen=True, slots=True)
@@ -343,6 +385,7 @@ def _decoder_options(harness: str, value: Any) -> Mapping[str, Any]:
             raise ManifestError(f"source.decoder.{key} must be a non-empty string")
     for key in {
         "minimum_user_events",
+        "minimum_total_events",
         "conversational_subagent_min_user_events",
     } & cfg.keys():
         _nonnegative_int(cfg[key], f"source.decoder.{key}", minimum=1)
@@ -358,6 +401,7 @@ def _decoder_options(harness: str, value: Any) -> Mapping[str, Any]:
         _bool(cfg[key], f"source.decoder.{key}")
     for key in {
         "excluded_cwd_prefixes",
+        "grandfathered_malformed_line_sha256",
         "operational_notification_prefixes",
         "channel_forward_prefixes",
         "session_metadata_fields",
@@ -365,6 +409,13 @@ def _decoder_options(harness: str, value: Any) -> Mapping[str, Any]:
         values = _string_list(cfg[key], f"source.decoder.{key}")
         if any(not item for item in values):
             raise ManifestError(f"source.decoder.{key} entries must not be empty")
+        if key == "grandfathered_malformed_line_sha256":
+            if any(not re.fullmatch(r"[0-9a-f]{64}", item) for item in values):
+                raise ManifestError(
+                    "Claude malformed-line hashes must be lowercase SHA-256 values"
+                )
+            if len(set(values)) != len(values):
+                raise ManifestError("Claude malformed-line hashes must be unique")
     if "conversation_kind" in cfg:
         _enum(
             cfg["conversation_kind"],
@@ -386,7 +437,7 @@ def _decoder_options(harness: str, value: Any) -> Mapping[str, Any]:
 
 def _source(value: Any, environ: Mapping[str, str]) -> SourceSpec:
     cfg = _mapping(value, "source")
-    _required(cfg, _SOURCE_KEYS, "source")
+    _required(cfg, _SOURCE_KEYS - _SOURCE_OPTIONAL_KEYS, "source")
     _only(cfg, _SOURCE_KEYS, "source")
     source_id = _label(cfg["id"], "source.id")
     enabled = _bool(cfg["enabled"], "source.enabled")
@@ -415,12 +466,41 @@ def _source(value: Any, environ: Mapping[str, str]) -> SourceSpec:
         raise ManifestError("candidate glob patterns must stay below their source root")
     decoder = _decoder_options(harness, cfg["decoder"])
     snapshot = _enum(
-        cfg["snapshot"], {"stable-bytes", "sqlite-readonly"}, "source.snapshot"
+        cfg["snapshot"],
+        {"stable-bytes", "sqlite-readonly", "sqlite-immutable"},
+        "source.snapshot",
     )
-    if harness == "opencode" and snapshot != "sqlite-readonly":
-        raise ManifestError("OpenCode sources require sqlite-readonly snapshots")
+    if harness == "opencode" and snapshot not in {
+        "sqlite-readonly",
+        "sqlite-immutable",
+    }:
+        raise ManifestError("OpenCode sources require a read-only SQLite snapshot")
     if harness != "opencode" and snapshot != "stable-bytes":
-        raise ManifestError("only OpenCode sources may use sqlite-readonly snapshots")
+        raise ManifestError("only OpenCode sources may use SQLite snapshots")
+    source_event = _mapping(cfg.get("event_policy", {}), "source.event_policy")
+    _only(
+        source_event,
+        {
+            "min_direct_user_events",
+            "min_user_chars",
+            "retain_conversational_subagents",
+            "retention_mode",
+        },
+        "source.event_policy",
+    )
+    for key in {"min_direct_user_events", "min_user_chars"} & source_event.keys():
+        _nonnegative_int(source_event[key], f"source.event_policy.{key}", minimum=1)
+    if "retain_conversational_subagents" in source_event:
+        _bool(
+            source_event["retain_conversational_subagents"],
+            "source.event_policy.retain_conversational_subagents",
+        )
+    if "retention_mode" in source_event:
+        _enum(
+            source_event["retention_mode"],
+            {"count-or-long", "count-only"},
+            "source.event_policy.retention_mode",
+        )
     return SourceSpec(
         source_id,
         enabled,
@@ -434,6 +514,7 @@ def _source(value: Any, environ: Mapping[str, str]) -> SourceSpec:
         snapshot,
         Discovery(discovery_mode, patterns),
         decoder,
+        source_event,
         _bool(cfg["allow_empty"], "source.allow_empty"),
     )
 
@@ -474,8 +555,9 @@ def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
         "min_direct_user_events",
         "min_user_chars",
         "retain_conversational_subagents",
+        "retention_mode",
     }
-    _required(event, event_keys, "event_policy")
+    _required(event, event_keys - {"retention_mode"}, "event_policy")
     _only(event, event_keys, "event_policy")
     event_policy = EventPolicy(
         _string_list(event["synthetic_prefixes"], "synthetic_prefixes"),
@@ -487,6 +569,11 @@ def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
         _nonnegative_int(event["min_user_chars"], "min_user_chars", minimum=1),
         _bool(
             event["retain_conversational_subagents"], "retain_conversational_subagents"
+        ),
+        _enum(
+            event.get("retention_mode", "count-or-long"),
+            {"count-or-long", "count-only"},
+            "event_policy.retention_mode",
         ),
     )
     if any(
@@ -500,8 +587,18 @@ def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
         raise ManifestError("event policy prefix and exact values must not be empty")
 
     project = _mapping(cfg["project_policy"], "project_policy")
-    project_keys = {"mode", "unknown", "allowlist", "denylist", "aliases"}
-    _required(project, project_keys, "project_policy")
+    project_keys = {
+        "mode",
+        "unknown",
+        "allowlist",
+        "denylist",
+        "aliases",
+        "resolvers",
+        "prompt_by_harness",
+    }
+    _required(
+        project, project_keys - {"resolvers", "prompt_by_harness"}, "project_policy"
+    )
     _only(project, project_keys, "project_policy")
     aliases = _mapping(project["aliases"], "project_policy.aliases")
     if any(
@@ -509,12 +606,86 @@ def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
         for key, value in aliases.items()
     ):
         raise ManifestError("project aliases must map strings to strings")
+    raw_resolvers = project.get("resolvers", [])
+    if not isinstance(raw_resolvers, list) or any(
+        not isinstance(item, dict) for item in raw_resolvers
+    ):
+        raise ManifestError("project_policy.resolvers must be an array of objects")
+    resolvers = []
+    for index, resolver in enumerate(raw_resolvers):
+        name = f"project_policy.resolvers[{index}]"
+        _required(resolver, {"source_ids", "field", "pattern"}, name)
+        _only(resolver, {"source_ids", "field", "pattern"}, name)
+        source_ids = _string_list(
+            resolver["source_ids"], f"{name}.source_ids", allow_empty=False
+        )
+        if any(not _LABEL.fullmatch(item) for item in source_ids):
+            raise ManifestError(f"{name}.source_ids must contain opaque labels")
+        if not set(source_ids).issubset(ids):
+            raise ManifestError(f"{name}.source_ids references an unknown source")
+        field = _enum(
+            resolver["field"],
+            {"cwd", "source_ref", "project_hint"},
+            f"{name}.field",
+        )
+        pattern = resolver["pattern"]
+        if not isinstance(pattern, str) or not pattern:
+            raise ManifestError(f"{name}.pattern must be a non-empty regex")
+        try:
+            compiled = re.compile(pattern)
+        except re.error as exc:
+            raise ManifestError(f"{name}.pattern is not a valid regex") from exc
+        if "project" not in compiled.groupindex:
+            raise ManifestError(f"{name}.pattern must define a named project group")
+        resolvers.append({"source_ids": source_ids, "field": field, "pattern": pattern})
+
+    prompt_by_harness_cfg = _mapping(
+        project.get("prompt_by_harness", {}),
+        "project_policy.prompt_by_harness",
+    )
+    prompt_by_harness = {}
+    for harness, raw_policy in prompt_by_harness_cfg.items():
+        if harness not in SUPPORTED_HARNESSES:
+            raise ManifestError(
+                "project_policy.prompt_by_harness has an unsupported harness"
+            )
+        policy = _mapping(raw_policy, f"project_policy.prompt_by_harness.{harness}")
+        keys = {"mode", "unknown", "allowlist", "denylist"}
+        _required(policy, keys, f"project_policy.prompt_by_harness.{harness}")
+        _only(policy, keys, f"project_policy.prompt_by_harness.{harness}")
+        allowlist = _string_list(
+            policy["allowlist"],
+            f"project_policy.prompt_by_harness.{harness}.allowlist",
+        )
+        denylist = _string_list(
+            policy["denylist"],
+            f"project_policy.prompt_by_harness.{harness}.denylist",
+        )
+        if any(not item for item in (*allowlist, *denylist)):
+            raise ManifestError("prompt project policy values must not be empty")
+        prompt_by_harness[harness] = {
+            "mode": _enum(
+                policy["mode"],
+                {"all", "allowlist", "denylist"},
+                f"project_policy.prompt_by_harness.{harness}.mode",
+            ),
+            "unknown": _enum(
+                policy["unknown"],
+                {"keep", "drop", "fail"},
+                f"project_policy.prompt_by_harness.{harness}.unknown",
+            ),
+            "allowlist": allowlist,
+            "denylist": denylist,
+        }
+
     project_policy = ProjectPolicy(
         _enum(project["mode"], {"all", "allowlist", "denylist"}, "project_policy.mode"),
         _enum(project["unknown"], {"keep", "drop", "fail"}, "project_policy.unknown"),
         _string_list(project["allowlist"], "project_policy.allowlist"),
         _string_list(project["denylist"], "project_policy.denylist"),
         aliases,
+        tuple(resolvers),
+        prompt_by_harness,
     )
     if any(not item for item in (*project_policy.allowlist, *project_policy.denylist)):
         raise ManifestError("project allowlist and denylist values must not be empty")
@@ -523,16 +694,68 @@ def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
     output_keys = {
         "repository_root",
         "history_directory",
+        "history_directory_by_harness",
         "prompt_directory",
         "layout",
         "migration",
+        "filename_strategy",
+        "filename_strategy_by_harness",
         "prompt_max_chars",
         "prompt_code_block_max_chars",
         "encryption_attributes",
         "compatibility",
     }
-    _required(output, output_keys, "output")
+    _required(
+        output,
+        output_keys
+        - {
+            "history_directory_by_harness",
+            "filename_strategy",
+            "filename_strategy_by_harness",
+        },
+        "output",
+    )
     _only(output, output_keys, "output")
+    history_directory_by_harness_cfg = _mapping(
+        output.get("history_directory_by_harness", {}),
+        "output.history_directory_by_harness",
+    )
+    if any(key not in SUPPORTED_HARNESSES for key in history_directory_by_harness_cfg):
+        raise ManifestError(
+            "output.history_directory_by_harness has an unsupported harness"
+        )
+    history_directory_by_harness = {
+        key: _relative(value, f"output.history_directory_by_harness.{key}")
+        for key, value in history_directory_by_harness_cfg.items()
+    }
+    filename_strategies = {
+        "project-session-suffix",
+        "session-prefix-8",
+        "session-last-component-prefix-8",
+        "session-suffix-8",
+        "node-session-sha256-12",
+    }
+    filename_strategy = _enum(
+        output.get("filename_strategy", "project-session-suffix"),
+        filename_strategies,
+        "output.filename_strategy",
+    )
+    filename_strategy_by_harness_cfg = _mapping(
+        output.get("filename_strategy_by_harness", {}),
+        "output.filename_strategy_by_harness",
+    )
+    if any(key not in SUPPORTED_HARNESSES for key in filename_strategy_by_harness_cfg):
+        raise ManifestError(
+            "output.filename_strategy_by_harness has an unsupported harness"
+        )
+    filename_strategy_by_harness = {
+        key: _enum(
+            value,
+            filename_strategies,
+            f"output.filename_strategy_by_harness.{key}",
+        )
+        for key, value in filename_strategy_by_harness_cfg.items()
+    }
     encryption_attributes = _mapping(
         output["encryption_attributes"], "output.encryption_attributes"
     )
@@ -554,7 +777,7 @@ def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
     _only(compatibility, {"rule_version", "unchanged_sha256"}, "output.compatibility")
     compatibility_rule = _enum(
         compatibility["rule_version"],
-        {"none", "legacy-output/v1"},
+        {"none", "legacy-output/v1", "legacy-agent-markdown/v1"},
         "output.compatibility.rule_version",
     )
     compatibility_hashes = _string_list(
@@ -577,17 +800,37 @@ def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
     output_spec = OutputSpec(
         _absolute(output["repository_root"], "output.repository_root"),
         _relative(output["history_directory"], "output.history_directory"),
+        history_directory_by_harness,
         _relative(output["prompt_directory"], "output.prompt_directory"),
         _enum(output["layout"], {"flat", "monthly"}, "output.layout"),
         _enum(output["migration"], {"none", "flat-to-monthly"}, "output.migration"),
+        filename_strategy,
+        filename_strategy_by_harness,
         prompt_max,
         code_max,
         encryption_attributes,
         compatibility_rule,
         compatibility_hashes,
     )
-    if output_spec.history_directory == output_spec.prompt_directory:
-        raise ManifestError("history and prompt output directories must be distinct")
+    output_directories = (
+        *output_spec.history_directories(),
+        output_spec.prompt_directory,
+    )
+    for index, left in enumerate(output_directories):
+        for right in output_directories[index + 1 :]:
+            if (
+                left == right
+                or left.startswith(right + "/")
+                or right.startswith(left + "/")
+            ):
+                raise ManifestError(
+                    "history and prompt output directories must be disjoint"
+                )
+    if len(output_spec.history_directories()) != 1 + len(
+        set(output_spec.history_directory_by_harness.values())
+        - {output_spec.history_directory}
+    ):
+        raise ManifestError("history output directory configuration is ambiguous")
 
     transforms = _mapping(cfg["transforms"], "transforms")
     _required(transforms, {"redaction"}, "transforms")
@@ -664,11 +907,7 @@ def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
         _required(key_cfg, {"source", "target"}, "publisher.key_link")
         _only(key_cfg, {"source", "target"}, "publisher.key_link")
         key_source = _absolute(key_cfg["source"], "publisher.key_link.source")
-        key_target = _relative(key_cfg["target"], "publisher.key_link.target")
-        if any(
-            key_target == item or key_target.startswith(item + "/") for item in owned
-        ):
-            raise ManifestError("publisher key link must be outside owned subtrees")
+        key_target = _git_crypt_key_target(key_cfg["target"])
     publisher_spec = PublisherSpec(
         _enum(
             publisher["strategy"],
@@ -687,9 +926,14 @@ def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
     )
     if publisher_spec.encryption == "git-crypt" and key_source is None:
         raise ManifestError("git-crypt publication requires a key link")
+    if (
+        publisher_spec.encryption == "git-crypt"
+        and publisher_spec.strategy != "git-worktree"
+    ):
+        raise ManifestError("git-crypt encryption requires git-worktree publication")
     if publisher_spec.encryption == "none" and key_source is not None:
         raise ManifestError("an unencrypted publisher must not configure a key link")
-    for directory in (output_spec.history_directory, output_spec.prompt_directory):
+    for directory in (*output_spec.history_directories(), output_spec.prompt_directory):
         if not any(
             directory == item or directory.startswith(item + "/") for item in owned
         ):

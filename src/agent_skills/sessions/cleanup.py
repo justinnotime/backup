@@ -39,7 +39,7 @@ def plan_cleanup(
     current = {session.identity for session in sessions}
     removals = []
     for entry in inventory.entries:
-        if entry.identity is None or entry.grandfathered:
+        if entry.identity is None:
             continue
         if entry.kind not in {"history", "prompts"}:
             continue

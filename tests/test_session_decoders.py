@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import tempfile
@@ -240,14 +241,14 @@ class ClaudeDecoderTest(unittest.TestCase):
             [
                 ("user-like", "synthetic direct request"),
                 ("user-like", "synthetic queued request"),
-                ("user-like", "[slash] /review synthetic-change"),
                 ("assistant", "synthetic claude answer"),
+                ("user-like", "[slash] /review synthetic-change"),
             ],
         )
         self.assertNotIn("ignored reasoning", repr(session.events))
         self.assertEqual(result.observations.accepted_direct_user_events, 3)
 
-    def test_sidechain_echo_does_not_hide_queued_prompt(self) -> None:
+    def test_sidechain_echo_suppresses_duplicate_queued_prompt(self) -> None:
         text = "synthetic queued-only request"
         result = ClaudeDecoder().decode(
             snapshot(
@@ -267,9 +268,261 @@ class ClaudeDecoderTest(unittest.TestCase):
             )
         )
         self.assertEqual(
-            [event.text for event in result.sessions[0].events],
-            [text],
+            [event.text for session in result.sessions for event in session.events],
+            [],
         )
+        self.assertEqual(result.observations.recognizable_user_markers, 0)
+
+    def test_real_user_text_blocks_are_supported(self) -> None:
+        result = ClaudeDecoder().decode(
+            snapshot(
+                "claude-code",
+                jsonl(
+                    {
+                        "type": "user",
+                        "message": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "synthetic block direct request",
+                                }
+                            ]
+                        },
+                    }
+                ),
+            )
+        )
+
+        self.assertEqual(result.completeness, "complete")
+        self.assertEqual(
+            [event.text for event in result.sessions[0].events],
+            ["synthetic block direct request"],
+        )
+        self.assertEqual(result.observations.recognizable_user_markers, 1)
+
+    def test_future_direct_user_input_text_blocks_are_visible(self) -> None:
+        result = ClaudeDecoder().decode(
+            snapshot(
+                "claude-code",
+                jsonl(
+                    {
+                        "type": "user",
+                        "message": {
+                            "content": [
+                                {
+                                    "type": "input_text",
+                                    "text": "synthetic future direct request",
+                                }
+                            ]
+                        },
+                    }
+                ),
+            )
+        )
+
+        self.assertEqual(result.completeness, "incomplete")
+        self.assertFalse(result.sessions)
+        self.assertEqual(result.observations.recognizable_user_markers, 1)
+        self.assertEqual(
+            result.observations.unknown_record_counts,
+            {"user.unknown-text-content": 1},
+        )
+
+    def test_current_metadata_records_are_explicitly_ignored(self) -> None:
+        metadata_records = (
+            {"type": "ai-title", "aiTitle": "synthetic title"},
+            {"type": "agent-setting", "setting": "synthetic setting"},
+            {"type": "atis-latch", "atis": "synthetic state"},
+            {"type": "cost-state", "cost": "synthetic cost state"},
+            {
+                "type": "file-history-delta",
+                "backup": "synthetic backup marker",
+            },
+            {"type": "last-prompt", "lastPrompt": "synthetic prompt marker"},
+            {"type": "mode", "mode": "synthetic mode"},
+            {"type": "permission-mode", "permissionMode": "synthetic mode"},
+            {"type": "pr-link", "prNumber": 1},
+            {"type": "relocated", "relocatedCwd": "/srv/example/relocated"},
+            {"type": "worktree-state", "worktreeSession": True},
+        )
+        result = ClaudeDecoder().decode(
+            snapshot(
+                "claude-code",
+                jsonl(
+                    {
+                        "type": "user",
+                        "sessionId": "claude-session-example",
+                        "message": {"content": "synthetic direct request"},
+                    },
+                    *metadata_records,
+                ),
+            )
+        )
+
+        self.assertEqual(result.completeness, "complete")
+        self.assertEqual(result.observations.unknown_record_counts, {})
+        self.assertEqual(
+            {
+                key
+                for key, count in result.observations.recognized_record_counts.items()
+                if key.startswith("ignored.") and count
+            },
+            {f"ignored.{record['type']}" for record in metadata_records},
+        )
+        self.assertEqual(
+            [event.text for event in result.sessions[0].events],
+            ["synthetic direct request"],
+        )
+
+    def test_main_session_filters_sidechain_and_meta_context(self) -> None:
+        result = ClaudeDecoder().decode(
+            snapshot(
+                "claude-code",
+                jsonl(
+                    {
+                        "type": "user",
+                        "isSidechain": True,
+                        "message": {"content": "synthetic sidechain echo"},
+                    },
+                    {
+                        "type": "user",
+                        "isMeta": True,
+                        "message": {"content": "synthetic metadata echo"},
+                    },
+                    {
+                        "type": "user",
+                        "message": {
+                            "content": [
+                                {"type": "tool_result", "content": "synthetic result"}
+                            ]
+                        },
+                    },
+                ),
+                options={
+                    "session_id": "claude-subagent-example",
+                    "conversation_kind": "main",
+                },
+            )
+        )
+
+        self.assertEqual(result.completeness, "complete")
+        self.assertFalse(result.sessions)
+        self.assertEqual(result.observations.recognizable_user_markers, 0)
+        self.assertEqual(result.observations.accepted_direct_user_events, 0)
+        self.assertEqual(result.rejected_sessions[0].reason_code, "NO_DIRECT_USER_EVENT")
+
+    def test_conversational_subagent_keeps_its_sidechain_conversation(self) -> None:
+        result = ClaudeDecoder().decode(
+            snapshot(
+                "claude-code",
+                jsonl(
+                    {
+                        "type": "user",
+                        "isSidechain": True,
+                        "message": {"content": "synthetic child request"},
+                    },
+                    {
+                        "type": "assistant",
+                        "isSidechain": True,
+                        "message": {
+                            "content": [
+                                {"type": "text", "text": "synthetic child answer"}
+                            ]
+                        },
+                    },
+                ),
+                source_ref="root/project/parent/subagents/agent-child.jsonl",
+                options={
+                    "conversation_kind": "conversational-subagent",
+                    "retain_conversational_subagents": True,
+                    "conversational_subagent_min_user_events": 1,
+                },
+            )
+        )
+
+        self.assertEqual(result.completeness, "complete")
+        self.assertEqual(result.sessions[0].session_id, "agent-child")
+        self.assertEqual(
+            [(event.role_hint, event.text) for event in result.sessions[0].events],
+            [
+                ("user-like", "synthetic child request"),
+                ("assistant", "synthetic child answer"),
+            ],
+        )
+
+    def test_unknown_future_record_remains_visible(self) -> None:
+        result = ClaudeDecoder().decode(
+            snapshot(
+                "claude-code",
+                jsonl(
+                    {
+                        "type": "user",
+                        "sessionId": "claude-session-example",
+                        "message": {"content": "synthetic direct request"},
+                    },
+                    {
+                        "type": "future-session-metadata",
+                        "futureField": "synthetic opaque value",
+                    },
+                ),
+            )
+        )
+
+        self.assertEqual(result.completeness, "incomplete")
+        self.assertEqual(
+            result.observations.unknown_record_counts,
+            {"future-session-metadata": 1},
+        )
+        self.assertIn(
+            "CLAUDE_UNKNOWN_RECORD", {item.code for item in result.diagnostics}
+        )
+
+    def test_only_exact_malformed_line_hashes_can_be_grandfathered(self) -> None:
+        malformed_line = b'{"type":"synthetic-broken"'
+        payload = (
+            jsonl(
+                {
+                    "type": "user",
+                    "sessionId": "claude-session-example",
+                    "message": {"content": "synthetic direct request"},
+                }
+            )
+            + malformed_line
+            + b"\n"
+        )
+        without_compatibility = ClaudeDecoder().decode(snapshot("claude-code", payload))
+        self.assertEqual(without_compatibility.completeness, "incomplete")
+        self.assertIn(
+            "CLAUDE_MALFORMED_RECORD",
+            {item.code for item in without_compatibility.diagnostics},
+        )
+
+        digest = hashlib.sha256(malformed_line).hexdigest()
+        grandfathered = ClaudeDecoder().decode(
+            snapshot(
+                "claude-code",
+                payload,
+                options={"grandfathered_malformed_line_sha256": [digest]},
+            )
+        )
+        self.assertEqual(grandfathered.completeness, "complete")
+        self.assertEqual(grandfathered.observations.unknown_record_counts, {})
+        self.assertEqual(
+            grandfathered.observations.recognized_record_counts[
+                "ignored.grandfathered-malformed-line"
+            ],
+            1,
+        )
+        self.assertNotIn(digest, repr(grandfathered))
+
+        wrong_hash = ClaudeDecoder().decode(
+            snapshot(
+                "claude-code",
+                payload,
+                options={"grandfathered_malformed_line_sha256": ["0" * 64]},
+            )
+        )
+        self.assertEqual(wrong_hash.completeness, "incomplete")
 
     def test_conversational_subagent_retention_is_configurable(self) -> None:
         records = [
@@ -411,6 +664,41 @@ def codex_response(
 
 
 class CodexDecoderTest(unittest.TestCase):
+    def test_response_item_synthetic_runtime_messages_are_filtered(self) -> None:
+        records = [codex_meta()]
+        for index, tag in enumerate(
+            ("hook_prompt", "subagent_notification", "turn_aborted"), start=1
+        ):
+            records.append(
+                {
+                    "type": "response_item",
+                    "timestamp": f"2026-01-05T10:00:0{index}Z",
+                    "payload": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": f"<{tag}>synthetic runtime context</{tag}>",
+                            }
+                        ],
+                    },
+                }
+            )
+        records.extend(codex_items())
+
+        result = self.decode(*records)
+
+        self.assertEqual(result.completeness, "complete")
+        self.assertEqual(
+            [(event.role_hint, event.text) for event in result.sessions[0].events],
+            [
+                ("user-like", "synthetic codex request"),
+                ("assistant", "synthetic codex answer"),
+            ],
+        )
+        self.assertNotIn("synthetic runtime context", repr(result.sessions))
+
     def decode(self, *records: dict, options: dict | None = None):
         return CodexDecoder().decode(
             snapshot(
@@ -473,6 +761,56 @@ class CodexDecoderTest(unittest.TestCase):
         self.assertIn(
             "CODEX_STREAMS_COMPLEMENTED",
             {item.code for item in complemented.diagnostics},
+        )
+
+    def test_competing_stream_versions_are_loud_and_not_concatenated(self) -> None:
+        result = self.decode(
+            codex_meta(),
+            *codex_items(answer="synthetic canonical answer"),
+            *codex_response(answer="synthetic competing answer"),
+        )
+
+        self.assertEqual(result.completeness, "incomplete")
+        self.assertIn(
+            "CODEX_STREAM_DIVERGENCE",
+            {item.code for item in result.diagnostics},
+        )
+        self.assertEqual(
+            [event.text for event in result.sessions[0].events],
+            ["synthetic codex request", "synthetic canonical answer"],
+        )
+        self.assertNotIn("synthetic competing answer", repr(result.sessions))
+
+    def test_shared_message_key_conflict_cannot_hide_as_a_subsequence(self) -> None:
+        items = codex_items(answer="synthetic old answer")
+        items[0]["payload"]["item"]["id"] = "shared-user"
+        items[1]["payload"]["item"]["id"] = "shared-answer"
+        items.append(
+            {
+                "type": "event_msg",
+                "timestamp": "2026-01-05T10:00:03Z",
+                "payload": {
+                    "type": "item_completed",
+                    "item": {
+                        "id": "later-answer",
+                        "type": "AgentMessage",
+                        "content": [
+                            {"type": "Text", "text": "synthetic new answer"}
+                        ],
+                    },
+                },
+            }
+        )
+        responses = codex_response(answer="synthetic new answer")
+        responses[0]["payload"]["id"] = "shared-user"
+        responses[1]["payload"]["id"] = "shared-answer"
+
+        result = self.decode(codex_meta(), *items, *responses)
+
+        self.assertEqual(result.completeness, "incomplete")
+        self.assertIn(
+            "CODEX_STREAM_DIVERGENCE",
+            {item.code for item in result.diagnostics},
         )
 
     def test_explicit_child_agent_is_dropped_but_user_fork_is_kept(self) -> None:
@@ -540,6 +878,93 @@ class CodexDecoderTest(unittest.TestCase):
             "CODEX_UNKNOWN_MESSAGE_FORMAT", {item.code for item in future.diagnostics}
         )
         self.assertNotIn("synthetic future request", repr(future.diagnostics))
+
+    def test_operational_error_and_world_state_are_explicitly_ignored(self) -> None:
+        result = self.decode(
+            codex_meta(),
+            *codex_items(),
+            {
+                "type": "event_msg",
+                "payload": {
+                    "type": "error",
+                    "message": "synthetic operational error",
+                    "codex_error_info": "synthetic error category",
+                },
+            },
+            {
+                "type": "world_state",
+                "ordinal": 1,
+                "payload": {
+                    "full": True,
+                    "state": {"syntheticKey": "synthetic state value"},
+                },
+            },
+            {
+                "type": "inter_agent_communication_metadata",
+                "ordinal": 2,
+                "payload": {"trigger_turn": False},
+            },
+            {
+                "type": "event_msg",
+                "payload": {
+                    "type": "item_completed",
+                    "item": {
+                        "type": "CollabAgentToolCall",
+                        "id": "synthetic-collaboration-call",
+                        "status": "completed",
+                        "agents_states": {},
+                        "receiver_agents": [],
+                        "receiver_thread_ids": [],
+                        "sender_thread_id": "synthetic-sender",
+                        "tool": "synthetic-tool",
+                    },
+                },
+            },
+            {
+                "type": "event_msg",
+                "payload": {
+                    "type": "item_completed",
+                    "item": {
+                        "type": "SubAgentActivity",
+                        "id": "synthetic-agent-activity",
+                        "agent_path": "synthetic-agent",
+                        "agent_thread_id": "synthetic-thread",
+                        "kind": "synthetic-kind",
+                    },
+                },
+            },
+        )
+
+        self.assertEqual(result.completeness, "complete")
+        self.assertEqual(result.observations.unknown_record_counts, {})
+        self.assertEqual(
+            result.observations.recognized_record_counts["event_msg.ignored.error"],
+            1,
+        )
+        self.assertEqual(
+            result.observations.recognized_record_counts["ignored.world_state"],
+            1,
+        )
+        self.assertEqual(
+            result.observations.recognized_record_counts[
+                "ignored.inter_agent_communication_metadata"
+            ],
+            1,
+        )
+        self.assertEqual(
+            result.observations.recognized_record_counts[
+                "event_msg.item_completed.ignored.CollabAgentToolCall"
+            ],
+            1,
+        )
+        self.assertEqual(
+            result.observations.recognized_record_counts[
+                "event_msg.item_completed.ignored.SubAgentActivity"
+            ],
+            1,
+        )
+        self.assertNotIn("synthetic operational error", repr(result.sessions))
+        self.assertNotIn("synthetic state value", repr(result.sessions))
 
 
 class CursorDecoderTest(unittest.TestCase):

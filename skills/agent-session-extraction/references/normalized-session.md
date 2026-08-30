@@ -38,3 +38,10 @@ It does not discover undeclared sources, decide cleanup, infer a consumer,
 write files, or print transcript text. Unknown message-like records appear in
 `FormatObservations.unknown_record_counts`; required malformed input makes the
 batch incomplete or invalid and blocks publication.
+
+`agent_skills.sessions.api.decode_source_snapshots` is the public parity
+boundary for a caller that has already frozen byte-backed `SourceSnapshot`
+values. It verifies source identity, decodes, applies manifest policy,
+normalizes, deduplicates, and returns an `ExtractionSnapshot` with format
+observations. It deliberately performs no discovery, rendering, cleanup, or
+publication and rejects snapshots that require direct-path revalidation.

@@ -3,15 +3,19 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from session_test_support import manifest_data, write_manifest
 
+from agent_skills.sessions import pipeline as pipeline_module
 from agent_skills.sessions.api import reconcile, run
 from agent_skills.sessions.manifest import load_manifest
 from agent_skills.sessions.pipeline import PipelineError, evaluate_pipeline
+from agent_skills.sessions.publish import PublishError
 
 
 def tree_digest(root: Path) -> str:
@@ -43,6 +47,42 @@ def write_claude(path: Path, *, text: str = "synthetic request") -> None:
     )
 
 
+def git(root: Path, *arguments: str) -> str:
+    process = subprocess.run(
+        ["git", *arguments],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return process.stdout
+
+
+def git_worktree_manifest(root: Path) -> Path:
+    source = root / "source"
+    source.mkdir()
+    write_claude(source / "session.jsonl")
+    output = root / "output"
+    output.mkdir()
+    git(output, "init", "-q")
+    git(output, "config", "user.name", "Synthetic Test")
+    git(output, "config", "user.email", "synthetic@example.invalid")
+    (output / "History").mkdir()
+    (output / "Prompts").mkdir()
+    (output / "History/.keep").write_text("history\n", encoding="utf-8")
+    (output / "Prompts/.keep").write_text("prompts\n", encoding="utf-8")
+    (output / "outside-tracked.txt").write_text("base\n", encoding="utf-8")
+    (output / ".gitignore").write_text(
+        "History/ignored.md\noutside-ignored.txt\n", encoding="utf-8"
+    )
+    git(output, "add", ".")
+    git(output, "commit", "-qm", "synthetic output baseline")
+    return write_manifest(
+        root / "manifest.json",
+        manifest_data(source, output, publisher="git-worktree"),
+    )
+
+
 class DryRunTest(unittest.TestCase):
     def test_full_dry_run_makes_no_filesystem_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -67,6 +107,145 @@ class DryRunTest(unittest.TestCase):
             self.assertFalse(marker.exists())
             self.assertEqual(report.session_count, 1)
             self.assertEqual(report.write_count, 2)
+
+    def test_git_worktree_rejects_owned_output_that_differs_from_head(self) -> None:
+        for difference in (
+            "tracked",
+            "untracked",
+            "ignored",
+            "assume-unchanged",
+            "skip-worktree",
+        ):
+            with (
+                self.subTest(difference=difference),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root = Path(temporary)
+                manifest = git_worktree_manifest(root)
+                output = root / "output"
+                if difference == "tracked":
+                    (output / "History/.keep").write_text(
+                        "changed\n", encoding="utf-8"
+                    )
+                elif difference == "untracked":
+                    (output / "History/untracked.md").write_text(
+                        "untracked\n", encoding="utf-8"
+                    )
+                else:
+                    if difference == "ignored":
+                        (output / "History/ignored.md").write_text(
+                            "ignored\n", encoding="utf-8"
+                        )
+                    elif difference == "assume-unchanged":
+                        git(
+                            output,
+                            "update-index",
+                            "--assume-unchanged",
+                            "History/.keep",
+                        )
+                    else:
+                        git(
+                            output,
+                            "update-index",
+                            "--skip-worktree",
+                            "History/.keep",
+                        )
+
+                with self.assertRaises(PipelineError) as caught:
+                    run(
+                        manifest,
+                        dry_run=True,
+                        environ={"HOME": str(root)},
+                    )
+
+                self.assertEqual(
+                    caught.exception.code,
+                    "GIT_WORKTREE_OUTPUT_NOT_AT_HEAD",
+                )
+
+    def test_git_worktree_allows_dirt_outside_owned_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = git_worktree_manifest(root)
+            output = root / "output"
+            (output / "outside-tracked.txt").write_text(
+                "changed outside\n", encoding="utf-8"
+            )
+            (output / "outside-untracked.txt").write_text(
+                "untracked outside\n", encoding="utf-8"
+            )
+            (output / "outside-ignored.txt").write_text(
+                "ignored outside\n", encoding="utf-8"
+            )
+
+            report = run(
+                manifest,
+                dry_run=True,
+                environ={"HOME": str(root)},
+            )
+
+            self.assertEqual(report.session_count, 1)
+
+    def test_git_worktree_rechecks_after_inventory_before_prepare(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = git_worktree_manifest(root)
+            output = root / "output"
+            destination = root / "prepared"
+            original_prepare = pipeline_module.prepare_git_worktree
+
+            def change_owned_output_then_prepare(manifest, plan, worktree):
+                (output / "History/.keep").write_text(
+                    "changed after inventory scan", encoding="utf-8"
+                )
+                return original_prepare(manifest, plan, worktree)
+
+            with (
+                mock.patch.object(
+                    pipeline_module,
+                    "prepare_git_worktree",
+                    side_effect=change_owned_output_then_prepare,
+                ),
+                self.assertRaises(PublishError),
+            ):
+                run(
+                    manifest,
+                    dry_run=False,
+                    git_worktree_destination=destination,
+                    environ={"HOME": str(root)},
+                )
+
+            self.assertFalse(destination.exists())
+
+    def test_git_worktree_detects_change_during_inventory_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest_path = git_worktree_manifest(root)
+            output = root / "output"
+            original_scan = pipeline_module.scan_inventory
+
+            def scan_then_change(manifest):
+                inventory = original_scan(manifest)
+                (output / "History/.keep").write_text(
+                    "changed during inventory scan", encoding="utf-8"
+                )
+                return inventory
+
+            with (
+                mock.patch.object(
+                    pipeline_module,
+                    "scan_inventory",
+                    side_effect=scan_then_change,
+                ),
+                self.assertRaises(PipelineError) as caught,
+            ):
+                run(
+                    manifest_path,
+                    dry_run=True,
+                    environ={"HOME": str(root)},
+                )
+
+            self.assertEqual(caught.exception.code, "GIT_WORKTREE_OUTPUT_NOT_AT_HEAD")
 
     def test_redaction_happens_before_planned_bytes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -106,6 +285,52 @@ class DryRunTest(unittest.TestCase):
                 environ={"HOME": str(root)},
             )
             self.assertEqual(report.session_count, 0)
+
+    def test_source_event_policy_overrides_global_retention_threshold(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            source.mkdir()
+            write_claude(source / "session.jsonl", text="short")
+            output = root / "output"
+            output.mkdir()
+            data = manifest_data(source, output)
+            data["sources"][0]["event_policy"] = {
+                "min_direct_user_events": 5,
+                "min_user_chars": 30,
+            }
+            report = run(
+                write_manifest(root / "manifest.json", data),
+                dry_run=True,
+                environ={"HOME": str(root)},
+            )
+            self.assertEqual(report.session_count, 0)
+
+    def test_project_resolver_uses_private_manifest_rules(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            project = source / "encoded-project-one"
+            project.mkdir(parents=True)
+            write_claude(project / "session.jsonl")
+            output = root / "output"
+            output.mkdir()
+            data = manifest_data(source, output)
+            data["project_policy"]["resolvers"] = [
+                {
+                    "source_ids": ["source-a"],
+                    "field": "source_ref",
+                    "pattern": r"^[^/]+/encoded-(?P<project>[^/]+)/",
+                }
+            ]
+            manifest = load_manifest(
+                write_manifest(root / "manifest.json", data),
+                environ={"HOME": str(root)},
+            )
+            snapshot, _inventory, _plan, _reconcile, _redactor = evaluate_pipeline(
+                manifest
+            )
+            self.assertEqual(snapshot.sessions[0].project, "project-one")
 
     def test_reconciliation_failure_does_not_write_marker_during_dry_run(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -159,9 +384,23 @@ class DryRunTest(unittest.TestCase):
             source = root / "source"
             source.mkdir()
             write_claude(source / "real.jsonl")
-            write_claude(
-                source / "marker-only.jsonl",
-                text="<system-reminder>synthetic context only",
+            (source / "marker-only.jsonl").write_text(
+                json.dumps(
+                    {
+                        "type": "user",
+                        "sessionId": "claude-future-user-format",
+                        "message": {
+                            "content": [
+                                {
+                                    "type": "input_text",
+                                    "text": "synthetic future direct request",
+                                }
+                            ]
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
             )
             output = root / "output"
             output.mkdir()
@@ -283,6 +522,86 @@ class DryRunTest(unittest.TestCase):
                 harness="opencode",
                 discovery_mode="file",
                 snapshot="sqlite-readonly",
+            )
+            with self.assertRaises(PipelineError):
+                run(
+                    write_manifest(root / "manifest.json", data),
+                    dry_run=True,
+                    environ={"HOME": str(root)},
+                )
+
+    def test_opencode_immutable_snapshot_reads_without_source_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            database = root / "opencode.db"
+            connection = sqlite3.connect(database)
+            try:
+                connection.executescript(
+                    """
+                    CREATE TABLE session (id TEXT, parent_id TEXT, title TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER);
+                    CREATE TABLE message (id TEXT, session_id TEXT, time_created INTEGER, data TEXT);
+                    CREATE TABLE part (id TEXT, message_id TEXT, time_created INTEGER, data TEXT);
+                    """
+                )
+                connection.execute(
+                    "INSERT INTO session VALUES (?, NULL, ?, ?, ?, ?)",
+                    ("immutable-session", "Synthetic", "/srv/example/project-one", 1, 2),
+                )
+                connection.execute(
+                    "INSERT INTO message VALUES (?, ?, ?, ?)",
+                    ("message", "immutable-session", 1, json.dumps({"role": "user"})),
+                )
+                connection.execute(
+                    "INSERT INTO part VALUES (?, ?, ?, ?)",
+                    (
+                        "part",
+                        "message",
+                        1,
+                        json.dumps({"type": "text", "text": "synthetic request"}),
+                    ),
+                )
+                connection.commit()
+            finally:
+                connection.close()
+            output = root / "output"
+            output.mkdir()
+            data = manifest_data(
+                database,
+                output,
+                harness="opencode",
+                discovery_mode="file",
+                snapshot="sqlite-immutable",
+            )
+            manifest = write_manifest(root / "manifest.json", data)
+            before = tree_digest(root)
+            report = run(
+                manifest,
+                dry_run=True,
+                environ={"HOME": str(root)},
+            )
+            after = tree_digest(root)
+            self.assertEqual(before, after)
+            self.assertEqual(report.session_count, 1)
+            self.assertFalse(Path(f"{database}-wal").exists())
+            self.assertFalse(Path(f"{database}-shm").exists())
+
+    def test_opencode_immutable_snapshot_rejects_nonempty_wal(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            database = root / "opencode.db"
+            connection = sqlite3.connect(database)
+            connection.execute("CREATE TABLE session (id TEXT)")
+            connection.commit()
+            connection.close()
+            Path(f"{database}-wal").write_bytes(b"synthetic nonempty WAL")
+            output = root / "output"
+            output.mkdir()
+            data = manifest_data(
+                database,
+                output,
+                harness="opencode",
+                discovery_mode="file",
+                snapshot="sqlite-immutable",
             )
             with self.assertRaises(PipelineError):
                 run(
