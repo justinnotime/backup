@@ -395,6 +395,8 @@ class ClaudeDecoder:
                 "permission-mode",
                 "pr-link",
                 "relocated",
+                "result",
+                "started",
                 "worktree-state",
             }:
                 recognized[f"ignored.{record_type}"] += 1

@@ -343,6 +343,12 @@ class ClaudeDecoderTest(unittest.TestCase):
             {"type": "permission-mode", "permissionMode": "synthetic mode"},
             {"type": "pr-link", "prNumber": 1},
             {"type": "relocated", "relocatedCwd": "/srv/example/relocated"},
+            {"type": "started", "key": "synthetic-agent-key"},
+            {
+                "type": "result",
+                "key": "synthetic-agent-key",
+                "result": {"summary": "synthetic agent result"},
+            },
             {"type": "worktree-state", "worktreeSession": True},
         )
         result = ClaudeDecoder().decode(
