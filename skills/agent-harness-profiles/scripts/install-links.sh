@@ -4,10 +4,13 @@ set -euo pipefail
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly SKILL_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
 readonly REPO_ROOT="$(cd -- "${SKILL_DIR}/../.." && pwd -P)"
+readonly ORIGINAL_HOME="${HOME}"
+readonly PROFILE_INSTALL_HOME="${ORIGINAL_HOME}"
 config_file="${BACKUP_CONFIG:-${HOME}/.config/backup/config}"
+check_only=false
 
 usage() {
-  printf 'usage: %s [--config FILE]\n' "${0##*/}" >&2
+  printf 'usage: %s [--config FILE] [--check]\n' "${0##*/}" >&2
 }
 
 fail() {
@@ -15,19 +18,61 @@ fail() {
   exit 1
 }
 
-if (( $# > 0 )); then
-  [[ $# -eq 2 && $1 == --config ]] || { usage; exit 2; }
-  config_file=$2
-fi
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/profile-paths.sh"
 
+while (( $# > 0 )); do
+  case "$1" in
+    --config)
+      (( $# >= 2 )) || { usage; exit 2; }
+      config_file=$2
+      shift 2
+      ;;
+    --check)
+      check_only=true
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+profile_require_stable_checkout "${REPO_ROOT}"
 [[ -f "${config_file}" ]] || fail "configuration file not found: ${config_file}"
+bash -n "${config_file}" || fail 'configuration syntax is invalid'
 # shellcheck disable=SC1090
 source "${config_file}"
-CLAUDE_HOME="${CLAUDE_HOME:-${HOME}/.claude}"
+[[ "${HOME}" == "${ORIGINAL_HOME}" ]] || fail 'configuration must not change HOME'
+CLAUDE_HOME="${CLAUDE_HOME:-${PROFILE_INSTALL_HOME}/.claude}"
+CODEX_HOME="${CODEX_HOME:-${PROFILE_INSTALL_HOME}/.codex}"
+DSH_HOME="${DSH_HOME:-${PROFILE_INSTALL_HOME}/.dsh}"
+OPENCODE_DATA_DIR="${OPENCODE_DATA_DIR:-${XDG_DATA_HOME:-${PROFILE_INSTALL_HOME}/.local/share}/opencode}"
+OPENCODE_CONFIG_SRC="${OPENCODE_CONFIG_SRC:-${XDG_CONFIG_HOME:-${PROFILE_INSTALL_HOME}/.config}/opencode}"
+OPENCODE_STATE_DIR="${OPENCODE_STATE_DIR:-${XDG_STATE_HOME:-${PROFILE_INSTALL_HOME}/.local/state}/opencode}"
 CLAUDE_PROFILES="${CLAUDE_PROFILES:-}"
 
+profile_reset_root_registry
+profile_reserve_path 'Backup checkout' "${REPO_ROOT}"
+profile_reserve_fixed_install_roots
+profile_reserve_native_roots claude
+profile_reserve_path 'profile configuration' "${config_file}"
+profile_validate_root claude default "${CLAUDE_HOME}"
+default_claude_root=${PROFILE_VALIDATED_ROOT}
+profile_validate_managed_directory "${default_claude_root}" "${CLAUDE_HOME}/skills" \
+  'native Claude Skill directory'
+profile_validate_contained_path "${PROFILE_INSTALL_HOME}" \
+  "${PROFILE_INSTALL_HOME}/.agents/skills" 'shared Skill link parent'
+profile_validate_contained_path "${PROFILE_INSTALL_HOME}" \
+  "${PROFILE_INSTALL_HOME}/bin" 'stable Backup command link parent'
+
 targets=(
-  "${HOME}/.agents/skills/agent-harness-profiles"
+  "${PROFILE_INSTALL_HOME}/.agents/skills/agent-harness-profiles"
   "${CLAUDE_HOME}/skills/agent-harness-profiles"
 )
 sources=("${SKILL_DIR}" "${SKILL_DIR}")
@@ -36,14 +81,14 @@ for entry in ${CLAUDE_PROFILES}; do
   root=${entry#*:}
   [[ -n "${label}" && "${label}" != "${entry}" && -n "${root}" ]] ||
     fail "malformed CLAUDE_PROFILES entry: ${entry}"
-  [[ "${label}" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || fail "unsafe Claude label: ${label}"
-  [[ "${root}" == /* && "${root}" != / && "${root}" != "${HOME}" ]] ||
-    fail "Claude root must be an absolute non-home path for label ${label}"
+  profile_validate_root claude "${label}" "${root}"
+  profile_validate_managed_directory "${PROFILE_VALIDATED_ROOT}" "${root}/skills" \
+    "Claude Skill directory for label ${label}"
   targets+=("${root}/skills/agent-harness-profiles")
   sources+=("${SKILL_DIR}")
 done
 
-targets+=("${HOME}/bin/backup")
+targets+=("${PROFILE_INSTALL_HOME}/bin/backup")
 sources+=("${REPO_ROOT}/backup.sh")
 
 for index in "${!targets[@]}"; do
@@ -53,8 +98,12 @@ for index in "${!targets[@]}"; do
     [[ -L "${target}" ]] || fail "refusing non-symlink target: ${target}"
     [[ "$(readlink -f -- "${target}" 2>/dev/null || true)" == "$(readlink -f -- "${source_path}")" ]] ||
       fail "refusing divergent symlink: ${target}"
+  else
+    profile_validate_writable_parent "${target}" "link target ${target}"
   fi
 done
+
+[[ "${check_only}" == false ]] || exit 0
 
 for index in "${!targets[@]}"; do
   target=${targets[$index]}

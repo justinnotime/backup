@@ -26,13 +26,20 @@ if (( BASH_VERSINFO[0] >= 4 )); then
 else
   error 'Bash 4+ is required'
 fi
-for required in rsync; do
+for required in git realpath rsync; do
   if command -v "${required}" >/dev/null 2>&1; then
     ok "command available: ${required}"
   else
     error "required command unavailable: ${required}"
   fi
 done
+if command -v realpath >/dev/null 2>&1; then
+  if realpath -m -- / >/dev/null 2>&1 && realpath -ms -- / >/dev/null 2>&1; then
+    ok 'realpath supports required options'
+  else
+    error 'realpath must support the -m and -s options'
+  fi
+fi
 command -v sqlite3 >/dev/null 2>&1 || warn 'sqlite3 is unavailable; OpenCode Backup uses its fallback copy path'
 
 if [[ -x "${REPO_ROOT}/backup.sh" ]]; then
@@ -54,7 +61,8 @@ if [[ -f "${config_file}" ]]; then
   else
     error 'configuration syntax'
   fi
-  if "${SCRIPT_DIR}/render-launchers.sh" --config "${config_file}" >/dev/null; then
+  if "${SCRIPT_DIR}/render-launchers.sh" --config "${config_file}" --check >/dev/null &&
+    "${SCRIPT_DIR}/prepare-opencode-roots.sh" --config "${config_file}" --check >/dev/null; then
     ok 'configured profile entries'
   else
     error 'configured profile entries'

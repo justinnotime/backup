@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly SKILL_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
+readonly REPO_ROOT="$(cd -- "${SKILL_DIR}/../.." && pwd -P)"
+readonly ORIGINAL_HOME="${HOME}"
 config_file="${BACKUP_CONFIG:-${HOME}/.config/backup/config}"
+check_only=false
 
 usage() {
-  printf 'usage: %s [--config FILE]\n' "${0##*/}" >&2
+  printf 'usage: %s [--config FILE] [--check]\n' "${0##*/}" >&2
 }
 
 fail() {
@@ -12,64 +17,97 @@ fail() {
   exit 1
 }
 
-if (( $# > 0 )); then
-  [[ $# -eq 2 && $1 == --config ]] || { usage; exit 2; }
-  config_file=$2
-fi
+while (( $# > 0 )); do
+  case "$1" in
+    --config)
+      (( $# >= 2 )) || { usage; exit 2; }
+      config_file=$2
+      shift 2
+      ;;
+    --check)
+      check_only=true
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+done
 
 [[ -f "${config_file}" ]] || fail "configuration file not found: ${config_file}"
+bash -n "${config_file}" || fail 'configuration syntax is invalid'
 # shellcheck disable=SC1090
 source "${config_file}"
-OPENCODE_PROFILES="${OPENCODE_PROFILES:-}"
+[[ "${HOME}" == "${ORIGINAL_HOME}" ]] || fail 'configuration must not change HOME'
+readonly PROFILE_INSTALL_HOME="${ORIGINAL_HOME}"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/profile-paths.sh"
 
+OPENCODE_PROFILES="${OPENCODE_PROFILES:-}"
+CLAUDE_HOME="${CLAUDE_HOME:-${PROFILE_INSTALL_HOME}/.claude}"
+CODEX_HOME="${CODEX_HOME:-${PROFILE_INSTALL_HOME}/.codex}"
+DSH_HOME="${DSH_HOME:-${PROFILE_INSTALL_HOME}/.dsh}"
+OPENCODE_DATA_DIR="${OPENCODE_DATA_DIR:-${XDG_DATA_HOME:-${PROFILE_INSTALL_HOME}/.local/share}/opencode}"
+OPENCODE_CONFIG_SRC="${OPENCODE_CONFIG_SRC:-${XDG_CONFIG_HOME:-${PROFILE_INSTALL_HOME}/.config}/opencode}"
+OPENCODE_STATE_DIR="${OPENCODE_STATE_DIR:-${XDG_STATE_HOME:-${PROFILE_INSTALL_HOME}/.local/state}/opencode}"
 roots=()
 labels=()
-seen=""
+profile_reset_root_registry
+profile_reserve_path 'Backup checkout' "${REPO_ROOT}"
+profile_reserve_fixed_install_roots
+profile_reserve_native_roots
+profile_reserve_path 'profile configuration' "${config_file}"
+
 for entry in ${OPENCODE_PROFILES}; do
   label=${entry%%:*}
   root=${entry#*:}
   [[ -n "${label}" && "${label}" != "${entry}" && -n "${root}" ]] ||
     fail "malformed OPENCODE_PROFILES entry: ${entry}"
-  [[ "${label}" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || fail "unsafe label: ${label}"
-  [[ "${root}" == /* && "${root}" != / && "${root}" != "${HOME}" ]] ||
-    fail "root must be an absolute non-home path for label ${label}"
-  [[ " ${seen} " != *" ${label} "* ]] || fail "duplicate label: ${label}"
-  seen="${seen} ${label}"
+  profile_validate_root opencode "${label}" "${root}"
+  resolved_root=${PROFILE_VALIDATED_ROOT}
+  profile_validate_managed_directory "${resolved_root}" "${root}/share" \
+    "OpenCode share root for label ${label}"
+  profile_validate_managed_directory "${resolved_root}" "${root}/share/opencode" \
+    "OpenCode data directory for label ${label}"
+  profile_validate_managed_directory "${resolved_root}" "${root}/state" \
+    "OpenCode state root for label ${label}"
+  profile_validate_managed_directory "${resolved_root}" "${root}/state/opencode" \
+    "OpenCode state directory for label ${label}"
+  profile_validate_managed_directory "${resolved_root}" "${root}/config" \
+    "OpenCode config root for label ${label}"
+  profile_validate_managed_directory "${resolved_root}" "${root}/config/opencode" \
+    "OpenCode config directory for label ${label}"
+  profile_validate_managed_file "${resolved_root}" "${root}/config/opencode/opencode.json" \
+    "OpenCode config file for label ${label}"
   labels+=("${label}")
   roots+=("${root}")
 done
 
-shopt -s nullglob
-config_sources=("${HOME}/.config"/*)
-shopt -u nullglob
+[[ "${check_only}" == false ]] || exit 0
 
-for root in "${roots[@]}"; do
-  for source_path in "${config_sources[@]}"; do
-    base=${source_path##*/}
-    [[ "${base}" != opencode ]] || continue
-    target_path="${root}/config/${base}"
-    if [[ -e "${target_path}" || -L "${target_path}" ]]; then
-      [[ -L "${target_path}" ]] || fail "refusing divergent target: ${target_path}"
-      [[ "$(readlink -f -- "${target_path}" 2>/dev/null || true)" == "$(readlink -f -- "${source_path}")" ]] ||
-        fail "refusing divergent symlink: ${target_path}"
-    fi
-  done
-done
+create_directory_if_missing() {
+  local directory=$1
+  [[ -d "${directory}" ]] || install -d -m 0700 "${directory}"
+}
 
 for index in "${!roots[@]}"; do
   root=${roots[$index]}
   label=${labels[$index]}
-  install -d -m 0700 "${root}/share/opencode" "${root}/state/opencode" "${root}/config/opencode"
-  for source_path in "${config_sources[@]}"; do
-    base=${source_path##*/}
-    [[ "${base}" != opencode ]] || continue
-    target_path="${root}/config/${base}"
-    if [[ ! -e "${target_path}" && ! -L "${target_path}" ]]; then
-      ln -s -- "${source_path}" "${target_path}"
-    fi
+  for directory in \
+    "${root}" \
+    "${root}/share" "${root}/share/opencode" \
+    "${root}/state" "${root}/state/opencode" \
+    "${root}/config" "${root}/config/opencode"; do
+    create_directory_if_missing "${directory}"
   done
   if [[ ! -e "${root}/config/opencode/opencode.json" ]]; then
-    printf '%s\n' '{"$schema":"https://opencode.ai/config.json"}' > "${root}/config/opencode/opencode.json"
+    printf '%s\n' '{"$schema":"https://opencode.ai/config.json"}' \
+      > "${root}/config/opencode/opencode.json"
     chmod 0600 "${root}/config/opencode/opencode.json"
   fi
   printf 'Prepared OpenCode root for label %s\n' "${label}"

@@ -32,6 +32,23 @@ while (( $# > 0 )); do
   esac
 done
 
+command -v rsync >/dev/null 2>&1 || {
+  printf 'setup installation failed: required command is unavailable: rsync\n' >&2
+  exit 1
+}
+for script in "${SCRIPT_DIR}"/*.sh; do
+  bash -n "${script}" || {
+    printf 'setup installation failed: invalid script syntax: %s\n' "${script##*/}" >&2
+    exit 1
+  }
+done
+
+# Finish every deterministic validation before the first persistent write.
+"${SCRIPT_DIR}/install-links.sh" --config "${config_file}" --check
+"${SCRIPT_DIR}/render-launchers.sh" \
+  --config "${config_file}" --output "${launcher_file}" --check
+"${SCRIPT_DIR}/prepare-opencode-roots.sh" --config "${config_file}" --check
+
 "${SCRIPT_DIR}/render-launchers.sh" --config "${config_file}" --output "${launcher_file}"
 "${SCRIPT_DIR}/prepare-opencode-roots.sh" --config "${config_file}"
 "${SCRIPT_DIR}/install-links.sh" --config "${config_file}"

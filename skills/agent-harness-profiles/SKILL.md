@@ -15,6 +15,10 @@ The stable configuration interface is `~/.config/backup/config` and its existing
 variables. A private repository may own that file or source a tracked private
 fragment from it. Read the Backup contract in
 `../state-backup/references/profiles.md` before changing the formats.
+The configuration is trusted local shell code; path checks prevent accidental
+misconfiguration, not hostile commands in that file.
+The scripts require Bash 4+, Git, rsync, and a `realpath` implementation with
+GNU-compatible `-m` and `-s` options.
 
 ## Install or update
 
@@ -27,12 +31,16 @@ scripts/install.sh --config "$HOME/.config/backup/config"
 
 The installer:
 
-1. renders `~/.config/agent-harness-profiles/launchers.sh`;
-2. prepares configured OpenCode roots without replacing divergent targets;
-3. links this canonical Skill into the shared and configured Claude discovery
+1. validates the checkout, launcher target, every configured root, and every
+   planned link before writing;
+2. renders `~/.config/agent-harness-profiles/launchers.sh`;
+3. prepares only `share/opencode`, `state/opencode`, and `config/opencode`
+   inside each configured OpenCode root, without copying native configuration
+   or credentials;
+4. links this canonical Skill into the shared and configured Claude discovery
    roots;
-4. preserves `~/bin/backup` as a link to the stable repository entrypoint;
-5. runs the doctor.
+5. preserves `~/bin/backup` as a link to the stable repository entrypoint;
+6. runs the doctor.
 
 It does not edit shell startup files, install services or schedulers, start a
 process, move state roots, or copy authentication data. Review the generated
@@ -45,13 +53,18 @@ For diagnosis without mutation, run `scripts/doctor.sh --config FILE`. Use
 ## Safety
 
 - Refuse unmanaged output files and divergent links.
+- Refuse roots that use dot components, resolve to native roots, overlap one
+  another, or redirect managed children outside their configured root.
 - Never derive a machine label from host or hardware state; require an opaque
   value in local configuration.
 - Profile isolation prevents accidental cross-use but is not a same-user
   security boundary.
 - Keep service ports and lifecycles in their owner configuration.
-- Publish links only from the stable Backup checkout, never from a disposable
-  topic worktree.
+- Install only from the primary `main` checkout. Linked worktrees, detached
+  checkouts, topic branches, and uncommitted linked implementation files are
+  rejected before any persistent write. Git cannot identify which independent
+  clone an operator considers long-lived, so invoke the installer only from the
+  selected durable checkout.
 
 After changing this Skill, run `tests/run.sh`, the repository Python tests, and
 the Skill Creator validator against this directory.
