@@ -306,7 +306,6 @@ class LegacyAdoptionTest(unittest.TestCase):
         self,
         root: Path,
         *,
-        migration: str = "none",
         compatibility_rule: str = "legacy-agent-markdown/v1",
         cleanup: str = "none",
         ownership: str = "owner",
@@ -320,7 +319,6 @@ class LegacyAdoptionTest(unittest.TestCase):
             output,
             cleanup=cleanup,
             ownership=ownership,
-            migration=migration,
         )
         data["output"]["compatibility"]["rule_version"] = compatibility_rule
         return load_manifest(
@@ -392,7 +390,6 @@ class LegacyAdoptionTest(unittest.TestCase):
             root = Path(temporary)
             manifest = self._manifest(
                 root,
-                migration="flat-to-monthly",
                 compatibility_rule="legacy-agent-markdown-frozen/v1",
                 cleanup="aggregator",
                 ownership="aggregator",
@@ -514,108 +511,6 @@ class LegacyAdoptionTest(unittest.TestCase):
                 "Prompts/orphan.md",
                 {item.relative_path for item in plan.writes},
             )
-
-    def test_flat_legacy_output_is_written_before_migration_removes_it(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            manifest = self._manifest(root, migration="flat-to-monthly")
-            name = "legacy.md"
-            history = manifest.output.repository_root / "History" / name
-            prompt = manifest.output.repository_root / "Prompts" / name
-            history.parent.mkdir(parents=True)
-            prompt.parent.mkdir(parents=True)
-            history.write_text(
-                _legacy_history("session-000000000001", "hello"),
-                encoding="utf-8",
-            )
-            prompt.write_text(_legacy_prompt("hello"), encoding="utf-8")
-            inventory = scan_inventory(manifest)
-            current = _session()
-            snapshot = ExtractionSnapshot(
-                (current,),
-                (SourceOutcome("source-a", "node-a", "success", 1, 1),),
-                {},
-            )
-
-            plan = build_publication_plan(
-                manifest,
-                snapshot,
-                inventory,
-                Redactor.from_spec(manifest.redaction),
-            )
-
-            self.assertEqual(
-                {item.relative_path for item in plan.removals},
-                {"History/legacy.md", "Prompts/legacy.md"},
-            )
-            self.assertEqual({item.kind for item in plan.writes}, {"history", "prompt"})
-            self.assertTrue(
-                all("/2026-01/" in item.relative_path for item in plan.writes)
-            )
-
-    def test_explicit_migration_removes_identical_flat_duplicate(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            manifest = self._manifest(root, migration="flat-to-monthly")
-            content = _legacy_history("session-000000000001", "hello")
-            flat = manifest.output.repository_root / "History" / "legacy.md"
-            monthly = (
-                manifest.output.repository_root
-                / "History"
-                / "2026-01"
-                / "2026-01-monthly.md"
-            )
-            flat.parent.mkdir(parents=True)
-            monthly.parent.mkdir(parents=True)
-            flat.write_text(content, encoding="utf-8")
-            monthly.write_text(content, encoding="utf-8")
-            inventory = scan_inventory(manifest)
-            current = _session()
-            snapshot = ExtractionSnapshot(
-                (current,),
-                (SourceOutcome("source-a", "node-a", "success", 1, 1),),
-                {},
-            )
-
-            plan = build_publication_plan(
-                manifest,
-                snapshot,
-                inventory,
-                Redactor.from_spec(manifest.redaction),
-            )
-
-            self.assertIn(
-                "History/legacy.md",
-                {item.relative_path for item in plan.removals},
-            )
-            self.assertNotIn(
-                "History/2026-01/2026-01-monthly.md",
-                {item.relative_path for item in plan.removals},
-            )
-
-    def test_migration_duplicate_exception_requires_exact_monthly_shape(self) -> None:
-        invalid_pairs = (
-            ("legacy.md", "not-a-month/2026-01-nested.md"),
-            ("legacy.md", "2026-02/2026-01-nested.md"),
-            ("legacy.md", "2026-01/2026-02-nested.md"),
-        )
-        for flat_name, nested in invalid_pairs:
-            with (
-                self.subTest(flat=flat_name, nested=nested),
-                tempfile.TemporaryDirectory() as temporary,
-            ):
-                root = Path(temporary)
-                manifest = self._manifest(root, migration="flat-to-monthly")
-                content = _legacy_history("session-000000000001", "hello")
-                flat = manifest.output.repository_root / "History" / flat_name
-                nested_path = manifest.output.repository_root / "History" / nested
-                flat.parent.mkdir(parents=True)
-                nested_path.parent.mkdir(parents=True)
-                flat.write_text(content, encoding="utf-8")
-                nested_path.write_text(content, encoding="utf-8")
-
-                with self.assertRaises(AuditError):
-                    scan_inventory(manifest)
 
     def test_reserved_legacy_paths_are_never_overwritten(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

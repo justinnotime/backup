@@ -326,30 +326,7 @@ def scan_inventory(manifest: Manifest) -> OutputInventory:
     for (identity, kind), duplicates in identities.items():
         if len(duplicates) == 1:
             continue
-        directory = (
-            manifest.output.history_directory_for(identity[0])
-            if kind == "history"
-            else manifest.output.prompt_directory
-        )
-        relative_parts = [
-            PurePosixPath(entry.relative_path).relative_to(directory).parts
-            for entry in duplicates
-        ]
-        flat_names = [parts[0] for parts in relative_parts if len(parts) == 1]
-        monthly_parts = [parts for parts in relative_parts if len(parts) == 2]
-        month = monthly_parts[0][0] if len(monthly_parts) == 1 else ""
-        explicit_exact_migration_pair = (
-            manifest.output.migration == "flat-to-monthly"
-            and manifest.output.layout == "monthly"
-            and len(duplicates) == 2
-            and len({entry.digest for entry in duplicates}) == 1
-            and len(flat_names) == 1
-            and len(monthly_parts) == 1
-            and re.fullmatch(r"\d{4}-(?:0[1-9]|1[0-2])", month) is not None
-            and monthly_parts[0][1].startswith(f"{month}-")
-        )
-        if not explicit_exact_migration_pair:
-            raise AuditError("output inventory contains duplicate session identities")
+        raise AuditError("output inventory contains duplicate session identities")
     return OutputInventory(tuple(entries))
 
 

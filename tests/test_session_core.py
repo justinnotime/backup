@@ -336,7 +336,7 @@ class CleanupTest(unittest.TestCase):
 
 
 class PreservedOutputTest(unittest.TestCase):
-    def _manifest(self, root: Path, *, migration: str = "none"):
+    def _manifest(self, root: Path):
         source = root / "source"
         source.mkdir()
         output = root / "output"
@@ -346,7 +346,6 @@ class PreservedOutputTest(unittest.TestCase):
             output,
             cleanup="none",
             indexes="every-node",
-            migration=migration,
         )
         return load_manifest(
             write_manifest(root / "manifest.json", data),
@@ -384,42 +383,6 @@ class PreservedOutputTest(unittest.TestCase):
             rendered = history_index.content.decode()
             self.assertIn("preserved-session", rendered)
             self.assertIn("current-session", rendered)
-
-    def test_flat_to_monthly_migration_requires_explicit_strategy(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            manifest = self._manifest(root, migration="flat-to-monthly")
-            current = session()
-            inventory = OutputInventory(
-                (
-                    entry_from_content(
-                        "History/legacy.md",
-                        render_history(current, manifest.output).encode(),
-                    ),
-                    entry_from_content(
-                        "Prompts/legacy.md",
-                        render_prompts(current, manifest.output).encode(),
-                    ),
-                )
-            )
-            snapshot = ExtractionSnapshot(
-                (current,),
-                (SourceOutcome("source-a", "node-a", "success", 1, 1),),
-                {},
-            )
-            plan = build_publication_plan(
-                manifest,
-                snapshot,
-                inventory,
-                Redactor.from_spec(manifest.redaction),
-            )
-            self.assertEqual(
-                {item.relative_path for item in plan.removals},
-                {"History/legacy.md", "Prompts/legacy.md"},
-            )
-            self.assertTrue(
-                all("/2026-01/" in item.relative_path for item in plan.writes)
-            )
 
     def test_harness_history_routes_are_configuration(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

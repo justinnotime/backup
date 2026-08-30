@@ -252,7 +252,6 @@ class OutputSpec:
     history_directory_by_harness: Mapping[str, str]
     prompt_directory: str
     layout: str
-    migration: str
     filename_strategy: str
     filename_strategy_by_harness: Mapping[str, str]
     prompt_max_chars: int
@@ -727,7 +726,6 @@ def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
         "history_directory_by_harness",
         "prompt_directory",
         "layout",
-        "migration",
         "filename_strategy",
         "filename_strategy_by_harness",
         "prompt_max_chars",
@@ -833,7 +831,6 @@ def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
         history_directory_by_harness,
         _relative(output["prompt_directory"], "output.prompt_directory"),
         _enum(output["layout"], {"flat", "monthly"}, "output.layout"),
-        _enum(output["migration"], {"none", "flat-to-monthly"}, "output.migration"),
         filename_strategy,
         filename_strategy_by_harness,
         prompt_max,

@@ -106,8 +106,10 @@ the latter counts the retained user and assistant events together.
   harness name to its history directory. Unlisted harnesses use
   `history_directory`; history and prompt directories must remain distinct,
   and every selected directory must be covered by `publisher.owned_subtrees`.
-- `output.layout`: `flat` or `monthly`; moving flat managed files requires the
-  explicit `flat-to-monthly` migration.
+- `output.layout`: `flat` or `monthly`. This is the steady-state destination
+  for new output. Move or remove existing files as a separately reviewed,
+  one-time consumer operation before enabling the scheduled writer; the
+  runtime stores only the steady-state destination.
 - `output.filename_strategy`: default deterministic basename strategy.
   `filename_strategy_by_harness` overrides it for named harnesses. Supported
   values are `project-session-suffix`, `session-prefix-8`,

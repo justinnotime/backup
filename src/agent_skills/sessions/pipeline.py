@@ -337,27 +337,7 @@ def _existing_paths(manifest: Manifest, inventory: OutputInventory):
     for entry in sorted(inventory.entries, key=lambda item: item.relative_path):
         if entry.identity is not None and entry.kind in {"history", "prompts"}:
             key = (entry.identity, entry.kind)
-            prior = result.get(key)
-            if prior is None:
-                result[key] = entry
-                continue
-            if (
-                manifest.output.migration == "flat-to-monthly"
-                and manifest.output.layout == "monthly"
-            ):
-                directory = (
-                    manifest.output.history_directory_for(entry.identity[0])
-                    if entry.kind == "history"
-                    else manifest.output.prompt_directory
-                )
-                prior_is_flat = (
-                    prior.relative_path.count("/") == directory.count("/") + 1
-                )
-                entry_is_flat = (
-                    entry.relative_path.count("/") == directory.count("/") + 1
-                )
-                if prior_is_flat and not entry_is_flat:
-                    result[key] = entry
+            result.setdefault(key, entry)
     return result
 
 
@@ -471,8 +451,8 @@ def build_publication_plan(
                     prior = available[0]
                     claimed_legacy_prompts.add(prior.relative_path)
             # Identity-less legacy prompts are paired by semantic content above.
-            # Apply the freeze again after that pairing so project policy and
-            # migration cannot rewrite or remove a newly claimed legacy file.
+            # Apply the freeze again after that pairing so project policy cannot
+            # rewrite or remove a newly claimed legacy file.
             if prior is not None and prior.relative_path in frozen_legacy_paths:
                 continue
             if entry_kind == "prompts" and not prompt_project_allowed(
@@ -498,20 +478,7 @@ def build_publication_plan(
                 directory, manifest.output.layout, session, filename
             )
             if prior is not None:
-                is_flat = prior.relative_path.count("/") == directory.count("/") + 1
-                migrate = (
-                    manifest.output.migration == "flat-to-monthly"
-                    and manifest.output.layout == "monthly"
-                    and is_flat
-                )
-                if not migrate:
-                    desired = prior.relative_path
-                elif prior.relative_path != desired:
-                    from .model import CleanupAction
-
-                    explicit_removals.append(
-                        CleanupAction(prior.relative_path, session.identity)
-                    )
+                desired = prior.relative_path
             conflicting = occupied.get(desired)
             prior_owns_desired = (
                 prior is not None and prior.relative_path == desired

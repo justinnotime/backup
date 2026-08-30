@@ -123,7 +123,6 @@
     },
     "prompt_directory": "SessionPrompts",
     "layout": "monthly",
-    "migration": "none",
     "filename_strategy": "project-session-suffix",
     "filename_strategy_by_harness": {
       "claude-code": "session-prefix-8",
