@@ -204,6 +204,42 @@ class NamingAndLayoutTest(unittest.TestCase):
                     all(line == line.rstrip() for line in rendered.splitlines())
                 )
 
+    def test_truncated_title_does_not_end_with_whitespace(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            output = root / "output"
+            source.mkdir()
+            output.mkdir()
+            manifest = load_manifest(
+                write_manifest(
+                    root / "manifest.json",
+                    manifest_data(source, output),
+                ),
+                environ={"HOME": str(root)},
+            )
+            timestamp = datetime(2026, 1, 2, 3, 4, tzinfo=UTC)
+            value = replace(
+                session(),
+                events=(
+                    Event(
+                        0,
+                        timestamp,
+                        "exact",
+                        "user",
+                        ("x" * 69) + " more words",
+                        "fixture.user",
+                    ),
+                ),
+            )
+
+            for rendered in (
+                render_history(value, manifest.output),
+                render_prompts(value, manifest.output),
+            ):
+                heading = rendered.splitlines()[0]
+                self.assertEqual(heading, heading.rstrip())
+
 
 class SessionDeduplicationTest(unittest.TestCase):
     @staticmethod

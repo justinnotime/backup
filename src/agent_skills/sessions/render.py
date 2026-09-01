@@ -33,7 +33,7 @@ def _title(session: Session) -> str:
         (item for item in session.events if item.role == "user"), session.events[0]
     )
     title = event.text.splitlines()[0].strip().lstrip("#").strip()
-    return (title[:70] or "Untitled session").replace("`", "'")
+    return (title[:70].rstrip() or "Untitled session").replace("`", "'")
 
 
 def _headers(session: Session, output: OutputSpec, kind: str) -> list[str]:
