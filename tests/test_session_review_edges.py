@@ -385,7 +385,7 @@ class LegacyAdoptionTest(unittest.TestCase):
                 [],
             )
 
-    def test_frozen_legacy_output_is_not_rewritten_or_cleaned(self) -> None:
+    def test_frozen_legacy_prompt_is_kept_and_history_is_refreshed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             manifest = self._manifest(
@@ -418,9 +418,27 @@ class LegacyAdoptionTest(unittest.TestCase):
                 Redactor.from_spec(manifest.redaction),
             )
 
-            self.assertEqual(plan.writes, ())
+            # A legacy history file whose session kept growing is rendered
+            # again under the current contract at its existing path.
+            history_writes = [item for item in plan.writes if item.kind == "history"]
+            self.assertEqual(
+                [item.relative_path for item in history_writes],
+                ["History/legacy.md"],
+            )
+            self.assertIn(
+                b"- Managed-By: agent-session-extraction/v1",
+                history_writes[0].content,
+            )
+            self.assertIn(b"hello", history_writes[0].content)
+            # The legacy prompt file stays byte-for-byte even though its
+            # session content differs; prompt consumers bind to those bytes.
+            self.assertEqual(
+                [item for item in plan.writes if item.kind == "prompt"],
+                [],
+            )
             self.assertEqual(plan.removals, ())
 
+            # Neither legacy kind is ever cleaned while the rule is active.
             without_current_session = replace(snapshot, sessions=())
             cleanup_plan = build_publication_plan(
                 manifest,
@@ -429,6 +447,43 @@ class LegacyAdoptionTest(unittest.TestCase):
                 Redactor.from_spec(manifest.redaction),
             )
             self.assertEqual(cleanup_plan.removals, ())
+
+    def test_frozen_rule_adopts_unchanged_legacy_history_in_place(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self._manifest(
+                root,
+                compatibility_rule="legacy-agent-markdown-frozen/v1",
+                cleanup="aggregator",
+                ownership="aggregator",
+            )
+            history = manifest.output.repository_root / "History" / "legacy.md"
+            prompt = manifest.output.repository_root / "Prompts" / "legacy.md"
+            history.parent.mkdir(parents=True)
+            prompt.parent.mkdir(parents=True)
+            history.write_text(
+                _legacy_history("session-000000000001", "hello"),
+                encoding="utf-8",
+            )
+            prompt.write_text(_legacy_prompt("hello"), encoding="utf-8")
+            snapshot = ExtractionSnapshot(
+                (_session(),),
+                (SourceOutcome("source-a", "node-a", "success", 1, 1),),
+                {},
+            )
+
+            plan = build_publication_plan(
+                manifest,
+                snapshot,
+                scan_inventory(manifest),
+                Redactor.from_spec(manifest.redaction),
+            )
+
+            self.assertEqual(
+                [item for item in plan.writes if item.kind in {"history", "prompt"}],
+                [],
+            )
+            self.assertEqual(plan.removals, ())
 
     def test_frozen_rule_still_writes_new_output_under_current_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

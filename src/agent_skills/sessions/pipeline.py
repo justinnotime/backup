@@ -347,11 +347,16 @@ def build_publication_plan(
     inventory: OutputInventory,
     redactor: Redactor,
 ) -> PublicationPlan:
+    # The frozen rule keeps legacy prompt files byte-for-byte because prompt
+    # consumers bind to those bytes. Legacy history files have no byte
+    # consumers, so a session that keeps growing after adoption is rendered
+    # again under the current contract at its existing path. Cleanup still
+    # exempts every grandfathered file (see cleanup.plan_cleanup).
     frozen_legacy_paths = (
         {
             entry.relative_path
             for entry in inventory.entries
-            if entry.grandfathered and entry.kind in {"history", "prompts"}
+            if entry.grandfathered and entry.kind == "prompts"
         }
         if manifest.output.compatibility_rule
         == FROZEN_LEGACY_AGENT_MARKDOWN_RULE
