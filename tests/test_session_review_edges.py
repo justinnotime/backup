@@ -385,7 +385,7 @@ class LegacyAdoptionTest(unittest.TestCase):
                 [],
             )
 
-    def test_frozen_rule_refreshes_changed_legacy_files_and_never_cleans_them(self) -> None:
+    def test_frozen_legacy_prompt_is_kept_and_history_is_refreshed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             manifest = self._manifest(
@@ -418,8 +418,8 @@ class LegacyAdoptionTest(unittest.TestCase):
                 Redactor.from_spec(manifest.redaction),
             )
 
-            # Legacy files whose session kept growing are rendered again under
-            # the current contract at their existing paths.
+            # A legacy history file whose session kept growing is rendered
+            # again under the current contract at its existing path.
             history_writes = [item for item in plan.writes if item.kind == "history"]
             self.assertEqual(
                 [item.relative_path for item in history_writes],
@@ -430,13 +430,15 @@ class LegacyAdoptionTest(unittest.TestCase):
                 history_writes[0].content,
             )
             self.assertIn(b"hello", history_writes[0].content)
+            # The legacy prompt file stays byte-for-byte even though its
+            # session content differs; prompt consumers bind to those bytes.
             self.assertEqual(
-                [item.relative_path for item in plan.writes if item.kind == "prompt"],
-                ["Prompts/legacy.md"],
+                [item for item in plan.writes if item.kind == "prompt"],
+                [],
             )
             self.assertEqual(plan.removals, ())
 
-            # Legacy files are never cleaned while the rule is active.
+            # Neither legacy kind is ever cleaned while the rule is active.
             without_current_session = replace(snapshot, sessions=())
             cleanup_plan = build_publication_plan(
                 manifest,

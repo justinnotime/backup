@@ -122,17 +122,19 @@ the latter counts the retained user and assistant events together.
   prompt, and README shapes, derives their ownership and semantic identity,
   and adopts unchanged content in place without a bulk rewrite. New or
   semantically changed output is rendered under the current contract.
-  `legacy-agent-markdown-frozen/v1` additionally guarantees that recognized
-  legacy history and prompt session files are never removed by cleanup or by
-  project policy. Their content is not frozen: when a legacy session later
-  grows, its files are rendered again under the current contract at their
-  existing paths, and unchanged files are adopted in place. New sessions
-  still use the current contract. Managed indexes are rebuilt from both
-  preserved and new session files. A consumer that binds to legacy prompt
-  bytes must re-derive its records when a legacy prompt file is rewritten;
-  the Work prompt translator does this on its next run for the affected day.
-  Returning to `legacy-agent-markdown/v1` explicitly ends the removal
-  guarantee and permits authority-scoped cleanup of adopted legacy files.
+  `legacy-agent-markdown-frozen/v1` additionally keeps recognized legacy
+  prompt session files byte-for-byte and excludes both legacy history and
+  legacy prompt files from cleanup while a consumer moves dependent prompt
+  readers to the current format. A recognized legacy history file is not
+  frozen: when its session later grows, the file is rendered again under the
+  current contract at its existing path, and an unchanged one is adopted in
+  place. New sessions still use the current contract. Managed indexes are
+  rebuilt from both preserved and new session files, so index bytes are not
+  frozen. Returning to `legacy-agent-markdown/v1` explicitly ends the freeze
+  and permits normal prompt rewrite and authority-scoped cleanup. While
+  frozen, an old prompt file whose session later grows remains at its
+  preserved snapshot; reconciliation proves that an output identity exists
+  but does not claim that snapshot is current.
 - `cleanup.scope`: `none`, `owner`, or `aggregator`. A node is eligible only
   when every enabled source assigned to that output node succeeded. A source's
   `owner`/`mirror` label describes where bytes came from; it never grants
