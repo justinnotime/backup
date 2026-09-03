@@ -347,21 +347,18 @@ def build_publication_plan(
     inventory: OutputInventory,
     redactor: Redactor,
 ) -> PublicationPlan:
-    # The frozen rule keeps legacy prompt files byte-for-byte because prompt
-    # consumers bind to those bytes. Legacy history files have no byte
-    # consumers, so a session that keeps growing after adoption is rendered
-    # again under the current contract at its existing path. Cleanup still
-    # exempts every grandfathered file (see cleanup.plan_cleanup).
-    frozen_legacy_paths = (
-        {
-            entry.relative_path
-            for entry in inventory.entries
-            if entry.grandfathered and entry.kind == "prompts"
-        }
-        if manifest.output.compatibility_rule
-        == FROZEN_LEGACY_AGENT_MARKDOWN_RULE
-        else set()
+    # Recognized legacy files are adopted like managed output: a session that
+    # keeps growing after adoption is rendered again under the current
+    # contract at its existing path, and an unchanged one stays in place.
+    # Under the frozen rule, legacy files are additionally never removed by
+    # this plan or by cleanup (see cleanup.plan_cleanup).
+    keep_legacy = (
+        manifest.output.compatibility_rule == FROZEN_LEGACY_AGENT_MARKDOWN_RULE
     )
+
+    def removable(entry) -> bool:
+        return not (keep_legacy and entry.grandfathered)
+
     strategies = {
         session.identity: manifest.output.filename_strategy_for(session.harness)
         for session in snapshot.sessions
@@ -428,12 +425,10 @@ def build_publication_plan(
             ),
         ):
             prior = existing.get((session.identity, entry_kind))
-            if prior is not None and prior.relative_path in frozen_legacy_paths:
-                continue
             duplicates = duplicate_existing.get((session.identity, entry_kind), [])
             if len(duplicates) > 1:
                 for duplicate in duplicates:
-                    if duplicate is prior:
+                    if duplicate is prior or not removable(duplicate):
                         continue
                     from .model import CleanupAction
 
@@ -456,14 +451,12 @@ def build_publication_plan(
                     prior = available[0]
                     claimed_legacy_prompts.add(prior.relative_path)
             # Identity-less legacy prompts are paired by semantic content above.
-            # Apply the freeze again after that pairing so project policy cannot
-            # rewrite or remove a newly claimed legacy file.
-            if prior is not None and prior.relative_path in frozen_legacy_paths:
-                continue
+            # Under the frozen rule, policy may stop writing a legacy file but
+            # never removes it.
             if entry_kind == "prompts" and not prompt_project_allowed(
                 manifest, session
             ):
-                if prior is not None:
+                if prior is not None and removable(prior):
                     from .model import CleanupAction
 
                     explicit_removals.append(
@@ -472,7 +465,7 @@ def build_publication_plan(
                 continue
             has_user_prompt = any(event.role == "user" for event in session.events)
             if entry_kind == "prompts" and not has_user_prompt:
-                if prior is not None:
+                if prior is not None and removable(prior):
                     from .model import CleanupAction
 
                     explicit_removals.append(
@@ -536,12 +529,6 @@ def build_publication_plan(
     for item in explicit_removals:
         if (item.relative_path, item.identity) not in removal_keys:
             removals.append(item)
-    touched_frozen = frozen_legacy_paths.intersection(
-        {item.relative_path for item in writes}
-        | {item.relative_path for item in removals}
-    )
-    if touched_frozen:
-        raise PipelineError("FROZEN_LEGACY_OUTPUT_MUTATION")
     return PublicationPlan(
         tuple(sorted(writes, key=lambda item: item.relative_path)),
         tuple(sorted(removals, key=lambda item: item.relative_path)),

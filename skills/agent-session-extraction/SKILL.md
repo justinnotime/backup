@@ -60,12 +60,11 @@ Use `sqlite-readonly` for a live or WAL-backed OpenCode database. Use
 immutability. Configure per-harness history directories and filename
 strategies in the manifest rather than adding consumer-specific render paths.
 Use a legacy compatibility rule only while adopting existing output; it does
-not relax the contract for newly written output. The frozen legacy rule preserves
-recognized old prompt session files byte-for-byte and keeps every recognized
-legacy file out of cleanup; old history files are rendered again when their
-session grows, and indexes continue to be rebuilt from the complete preserved
-inventory. Remove that rule explicitly when dependent prompt readers are ready
-for normal rewrite and cleanup.
+not relax the contract for newly written output. The frozen legacy rule keeps
+every recognized legacy file out of cleanup and policy removal; legacy history
+and prompt files are rendered again when their session grows, and indexes
+continue to be rebuilt from the complete preserved inventory. Remove that rule
+explicitly when adopted legacy files may be cleaned like managed output.
 
 Parity adapters that already hold caller-frozen byte snapshots may import
 `decode_source_snapshots` from `agent_skills.sessions.api`. It applies the
