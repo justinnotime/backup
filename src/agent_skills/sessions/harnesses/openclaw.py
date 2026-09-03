@@ -16,6 +16,7 @@ from ..model import (
     RejectedSession,
     SourceSnapshot,
 )
+from .base import jsonl_lines
 
 
 def _timestamp(value: object) -> datetime | None:
@@ -116,7 +117,7 @@ class OpenClawDecoder:
         malformed = 0
         unknown: dict[str, int] = {}
         recognized: dict[str, int] = {}
-        for line in snapshot.payload.splitlines():
+        for line in jsonl_lines(snapshot.payload):
             if not line.strip():
                 continue
             try:

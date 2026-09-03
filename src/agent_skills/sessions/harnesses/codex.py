@@ -19,6 +19,7 @@ from ..model import (
     RejectedSession,
     SourceSnapshot,
 )
+from .base import jsonl_lines
 
 _DEFAULT_SYNTHETIC_PREFIXES = (
     "<environment_context>",
@@ -70,7 +71,7 @@ def _parse_timestamp(value: Any) -> datetime | None:
 def _jsonl(payload: bytes) -> tuple[list[tuple[int, Mapping[str, Any]]], int]:
     records: list[tuple[int, Mapping[str, Any]]] = []
     malformed = 0
-    for sequence, raw_line in enumerate(payload.splitlines()):
+    for sequence, raw_line in enumerate(jsonl_lines(payload)):
         if not raw_line.strip():
             continue
         try:

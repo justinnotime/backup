@@ -195,23 +195,21 @@ def stable_read(candidate: Path, source: SourceSpec, root: ValidatedRoot) -> byt
                 raise SourceAccessError(
                     "opened candidate escaped its configured source"
                 )
+        # Session logs are append-only and often live. The bytes that existed
+        # when the descriptor was opened are a consistent prefix snapshot: later
+        # appends belong to the next run, and a torn final line is dropped by
+        # the JSONL decoders. Only a file that shrinks under us is unstable.
         chunks = []
-        while True:
-            block = os.read(descriptor, 1024 * 1024)
+        remaining = before.st_size
+        while remaining > 0:
+            block = os.read(descriptor, min(remaining, 1024 * 1024))
             if not block:
                 break
             chunks.append(block)
-        after = os.fstat(descriptor)
+            remaining -= len(block)
         _validate_open_descriptor(candidate, descriptor, source, root)
-        identity_before = (
-            before.st_dev,
-            before.st_ino,
-            before.st_size,
-            before.st_mtime_ns,
-        )
-        identity_after = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
-        if identity_before != identity_after:
-            raise SourceAccessError("candidate changed during its stable read")
+        if remaining:
+            raise SourceAccessError("candidate shrank during its stable read")
         return b"".join(chunks)
     finally:
         os.close(descriptor)

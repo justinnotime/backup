@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -484,3 +485,65 @@ class PublisherManifestTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StableReadTest(unittest.TestCase):
+    def _candidate(self, root: Path):
+        source = root / "source"
+        source.mkdir()
+        output = root / "output"
+        output.mkdir()
+        target = source / "session.jsonl"
+        target.write_bytes(b'{"type":"user"}\n{"type":"assistant"}\n')
+        manifest = load_manifest(
+            write_manifest(root / "manifest.json", manifest_data(source, output)),
+            environ={"HOME": str(root)},
+        )
+        spec = manifest.sources[0]
+        validated = validate_configured_path(spec)
+        candidate = discover_candidates(spec, validated)[0]
+        return spec, validated, candidate, target
+
+    def test_bytes_appended_during_the_read_are_left_for_the_next_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            spec, validated, candidate, target = self._candidate(Path(temporary))
+            original = target.read_bytes()
+            real_read = os.read
+            appended: list[bool] = []
+
+            def read_then_append(descriptor: int, size: int) -> bytes:
+                if not appended:
+                    appended.append(True)
+                    with open(target, "ab") as handle:
+                        handle.write(b'{"type":"late","text":"appended while reading"}\n')
+                return real_read(descriptor, size)
+
+            with mock.patch(
+                "agent_skills.sessions.sources.os.read", side_effect=read_then_append
+            ):
+                result = snapshot_candidate(spec, validated, candidate)
+            self.assertTrue(appended)
+            self.assertEqual(result.payload, original)
+            self.assertGreater(target.stat().st_size, len(original))
+
+    def test_candidate_that_shrinks_during_the_read_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            spec, validated, candidate, target = self._candidate(Path(temporary))
+            real_read = os.read
+            truncated: list[bool] = []
+
+            def read_then_truncate(descriptor: int, size: int) -> bytes:
+                if not truncated:
+                    truncated.append(True)
+                    os.truncate(target, 0)
+                return real_read(descriptor, size)
+
+            with (
+                mock.patch(
+                    "agent_skills.sessions.sources.os.read",
+                    side_effect=read_then_truncate,
+                ),
+                self.assertRaises(SourceAccessError),
+            ):
+                snapshot_candidate(spec, validated, candidate)
+            self.assertTrue(truncated)

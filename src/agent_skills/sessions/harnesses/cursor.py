@@ -15,6 +15,7 @@ from ..model import (
     RejectedSession,
     SourceSnapshot,
 )
+from .base import jsonl_lines
 
 _QUERY_RE = re.compile(r"<user_query>\s*(.*?)\s*</user_query>", re.DOTALL)
 _TIMESTAMP_RE = re.compile(
@@ -130,7 +131,7 @@ class CursorDecoder:
         accepted_users = 0
         last_user_timestamp: datetime | None = None
 
-        lines = snapshot.payload.splitlines()
+        lines = jsonl_lines(snapshot.payload)
         for line in lines:
             if not line.strip():
                 continue

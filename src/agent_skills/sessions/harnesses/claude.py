@@ -20,6 +20,7 @@ from ..model import (
     RejectedSession,
     SourceSnapshot,
 )
+from .base import jsonl_lines
 
 _DEFAULT_SYNTHETIC_PREFIXES = (
     "<task-notification>",
@@ -59,7 +60,7 @@ def _jsonl(
     records: list[tuple[int, Mapping[str, Any]]] = []
     malformed = 0
     grandfathered = 0
-    for sequence, raw_line in enumerate(payload.splitlines()):
+    for sequence, raw_line in enumerate(jsonl_lines(payload)):
         if not raw_line.strip():
             continue
         try:

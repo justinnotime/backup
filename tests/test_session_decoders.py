@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 
 from agent_skills.sessions.harnesses import decoder_for
+from agent_skills.sessions.harnesses.base import jsonl_lines
 from agent_skills.sessions.harnesses.claude import ClaudeDecoder
 from agent_skills.sessions.harnesses.codex import CodexDecoder
 from agent_skills.sessions.harnesses.cursor import CursorDecoder
@@ -1176,3 +1177,56 @@ class OpenClawDecoderTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TornTailTest(unittest.TestCase):
+    def test_unterminated_unparseable_tail_is_left_for_the_next_read(self) -> None:
+        payload = jsonl({"a": 1}, {"b": 2}) + b'{"c": "still being writ'
+        self.assertEqual(jsonl_lines(payload), [b'{"a": 1}', b'{"b": 2}'])
+
+    def test_unterminated_complete_record_is_kept(self) -> None:
+        payload = jsonl({"a": 1}) + b'{"b": 2}'
+        self.assertEqual(jsonl_lines(payload), [b'{"a": 1}', b'{"b": 2}'])
+
+    def test_terminated_malformed_line_still_counts_as_malformed(self) -> None:
+        payload = jsonl({"a": 1}) + b'{"broken"\n'
+        self.assertEqual(jsonl_lines(payload), [b'{"a": 1}', b'{"broken"'])
+
+    def test_codex_snapshot_torn_inside_a_live_line_stays_complete(self) -> None:
+        records = [codex_meta(), *codex_items()]
+        complete = CodexDecoder().decode(snapshot("codex", jsonl(*records)))
+        torn_payload = jsonl(*records) + jsonl(codex_items()[0])[:40]
+        torn = CodexDecoder().decode(snapshot("codex", torn_payload))
+
+        self.assertEqual(complete.completeness, "complete")
+        self.assertEqual(torn.completeness, "complete")
+        self.assertNotIn(
+            "CODEX_MALFORMED_RECORD", {item.code for item in torn.diagnostics}
+        )
+        self.assertEqual(torn.sessions, complete.sessions)
+
+    def test_claude_snapshot_torn_inside_a_live_line_stays_complete(self) -> None:
+        records = [
+            {
+                "type": "user",
+                "sessionId": "claude-session-example",
+                "cwd": "/srv/example/project-one",
+                "timestamp": "2026-01-05T10:00:00Z",
+                "message": {"content": "synthetic direct request"},
+            },
+            {
+                "type": "assistant",
+                "timestamp": "2026-01-05T10:00:02Z",
+                "message": {"content": [{"type": "text", "text": "synthetic answer"}]},
+            },
+        ]
+        complete = ClaudeDecoder().decode(snapshot("claude-code", jsonl(*records)))
+        torn_payload = jsonl(*records) + jsonl(records[0])[:35]
+        torn = ClaudeDecoder().decode(snapshot("claude-code", torn_payload))
+
+        self.assertEqual(complete.completeness, "complete")
+        self.assertEqual(torn.completeness, "complete")
+        self.assertNotIn(
+            "CLAUDE_MALFORMED_RECORD", {item.code for item in torn.diagnostics}
+        )
+        self.assertEqual(torn.sessions, complete.sessions)
