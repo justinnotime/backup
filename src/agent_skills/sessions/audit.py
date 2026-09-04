@@ -211,7 +211,13 @@ def entry_from_content(
         required = ("Tool", "Host", "Session")
         if any(not headers.get(key) for key in required):
             raise AuditError("managed output is missing identity headers")
-        identity = (headers["Tool"], headers["Host"], headers["Session"])
+        session_component = headers["Session"]
+        day = headers.get("Day")
+        if day:
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+                raise AuditError("managed output has an invalid Day header")
+            session_component = f"{session_component}@{day}"
+        identity = (headers["Tool"], headers["Host"], session_component)
     return InventoryEntry(relative_path, digest, identity, kind, headers, title)
 
 
@@ -391,6 +397,11 @@ def audit_plan(
         for key, value in required.items():
             if headers.get(key) != value:
                 raise AuditError(f"new output has an invalid {key} header")
+        if session.day is not None:
+            if headers.get("Day") != session.day:
+                raise AuditError("new output has an invalid Day header")
+        elif "Day" in headers:
+            raise AuditError("new output has an unexpected Day header")
         if Path(headers["Source"]).is_absolute():
             raise AuditError("new output exposes an absolute source path")
     for removal in plan.removals:

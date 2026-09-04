@@ -19,6 +19,8 @@ def identity_digest(identity: tuple[str, str, str], length: int = 12) -> str:
 
 
 def date_for(session: Session) -> str:
+    if session.day is not None:
+        return session.day
     return (
         session.started_at.strftime("%Y-%m-%d") if session.started_at else "0000-00-00"
     )

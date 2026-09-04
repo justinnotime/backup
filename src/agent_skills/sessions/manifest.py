@@ -12,6 +12,7 @@ from typing import Any
 
 from .model import MANIFEST_SCHEMA_VERSION, SUPPORTED_HARNESSES
 
+DAY_SPLIT_MODES = ("off", "hybrid", "all")
 LEGACY_AGENT_MARKDOWN_RULE = "legacy-agent-markdown/v1"
 FROZEN_LEGACY_AGENT_MARKDOWN_RULE = "legacy-agent-markdown-frozen/v1"
 LEGACY_AGENT_MARKDOWN_RULES = frozenset(
@@ -103,6 +104,7 @@ _RESERVED_OUTPUT_HEADERS = {
     "Cwd",
     "Started",
     "Ended",
+    "Day",
 }
 
 
@@ -259,6 +261,11 @@ class OutputSpec:
     encryption_attributes: Mapping[str, str]
     compatibility_rule: str
     compatibility_sha256: tuple[str, ...]
+    # off: one file per session for its whole life (historical behaviour).
+    # hybrid: sessions that already have output keep one file; sessions first
+    #   seen after the switch get one file per UTC day. all: slice every
+    #   session, including ones with existing output (evaluation/migration).
+    day_split: str = "off"
 
     def history_directory_for(self, harness: str) -> str:
         return self.history_directory_by_harness.get(harness, self.history_directory)
@@ -732,6 +739,7 @@ def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
         "prompt_code_block_max_chars",
         "encryption_attributes",
         "compatibility",
+        "day_split",
     }
     _required(
         output,
@@ -740,6 +748,7 @@ def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
             "history_directory_by_harness",
             "filename_strategy",
             "filename_strategy_by_harness",
+            "day_split",
         },
         "output",
     )
@@ -825,6 +834,9 @@ def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
         raise ManifestError(
             "prompt_code_block_max_chars must not exceed prompt_max_chars"
         )
+    day_split = _enum(
+        output.get("day_split", "off"), set(DAY_SPLIT_MODES), "output.day_split"
+    )
     output_spec = OutputSpec(
         _absolute(output["repository_root"], "output.repository_root"),
         _relative(output["history_directory"], "output.history_directory"),
@@ -838,6 +850,7 @@ def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
         encryption_attributes,
         compatibility_rule,
         compatibility_hashes,
+        day_split,
     )
     output_directories = (
         *output_spec.history_directories(),

@@ -26,6 +26,11 @@ def _parser() -> argparse.ArgumentParser:
     extract.add_argument("--failure-marker", type=Path)
     extract.add_argument("--prepare-worktree", type=Path)
     extract.add_argument("--output-root", type=Path)
+    extract.add_argument(
+        "--day-split",
+        choices=("off", "hybrid", "all"),
+        help="override output.day_split for this run",
+    )
 
     check = commands.add_parser(
         "doctor", help="check manifest, paths, and decoder capabilities"
@@ -37,6 +42,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     compare.add_argument("--manifest", required=True)
     compare.add_argument("--failure-marker", type=Path)
+    compare.add_argument("--day-split", choices=("off", "hybrid", "all"))
     return parser
 
 
@@ -54,6 +60,7 @@ def main(argv: list[str] | None = None) -> int:
                 failure_marker=args.failure_marker,
                 git_worktree_destination=args.prepare_worktree,
                 output_root=args.output_root,
+                day_split=args.day_split,
             )
             _emit(asdict(report))
             return 0
@@ -61,7 +68,9 @@ def main(argv: list[str] | None = None) -> int:
             report = doctor(args.manifest)
             _emit(report)
             return 0 if report["status"] == "ok" else 1
-        report = reconcile(args.manifest, failure_marker=args.failure_marker)
+        report = reconcile(
+            args.manifest, failure_marker=args.failure_marker, day_split=args.day_split
+        )
         _emit(
             {
                 "status": "ok" if report.ok else "failed",

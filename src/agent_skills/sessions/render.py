@@ -44,9 +44,10 @@ def _headers(session: Session, output: OutputSpec, kind: str) -> list[str]:
         f"Tool: {session.harness}",
         f"Host: {session.node_label}",
         f"Session: {session.session_id}",
-        f"Source: {session.source_ref}",
-        f"Project: {session.project}",
     ]
+    if session.day is not None:
+        lines.append(f"Day: {session.day}")
+    lines.extend([f"Source: {session.source_ref}", f"Project: {session.project}"])
     for key in sorted(output.encryption_attributes):
         lines.append(f"{key}: {output.encryption_attributes[key]}")
     return lines

@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 
-from .manifest import Manifest, ManifestError, load_manifest
+from .manifest import DAY_SPLIT_MODES, Manifest, ManifestError, load_manifest
 from .model import Diagnostic, ReconcileReport, RunReport
 from .pipeline import (
     PipelineError,
@@ -28,6 +28,15 @@ def _environment(environ: Mapping[str, str] | None) -> Mapping[str, str]:
     return {"HOME": os.environ.get("HOME", "")}
 
 
+def _with_day_split(manifest: Manifest, day_split: str | None) -> Manifest:
+    """Apply an optional caller override of ``output.day_split``."""
+    if day_split is None:
+        return manifest
+    if day_split not in DAY_SPLIT_MODES:
+        raise ManifestError("day split override must be one of: off, hybrid, all")
+    return replace(manifest, output=replace(manifest.output, day_split=day_split))
+
+
 def run(
     manifest_path: str | os.PathLike[str],
     *,
@@ -36,8 +45,10 @@ def run(
     failure_marker: Path | None = None,
     git_worktree_destination: Path | None = None,
     output_root: Path | None = None,
+    day_split: str | None = None,
 ) -> RunReport:
     manifest = load_manifest(manifest_path, environ=_environment(environ))
+    manifest = _with_day_split(manifest, day_split)
     if output_root is not None:
         if not output_root.is_absolute():
             raise ManifestError("output root override must be absolute")
@@ -110,8 +121,10 @@ def reconcile(
     *,
     environ: Mapping[str, str] | None = None,
     failure_marker: Path | None = None,
+    day_split: str | None = None,
 ) -> ReconcileReport:
     manifest = load_manifest(manifest_path, environ=_environment(environ))
+    manifest = _with_day_split(manifest, day_split)
     _snapshot, _inventory, _plan, report, _redactor = evaluate_pipeline(manifest)
     if failure_marker is not None:
         if report.ok:

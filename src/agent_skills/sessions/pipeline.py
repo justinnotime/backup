@@ -44,6 +44,7 @@ from .publish import (
 from .reconcile import decoder_canary_self_test, reconcile_snapshot
 from .redact import Redactor
 from .render import render_history, render_prompts
+from .slicing import slice_sessions_by_day
 from .sources import (
     SourceAccessError,
     discover_candidates,
@@ -410,6 +411,16 @@ def build_publication_plan(
     explicit_removals = []
     diagnostics = []
     occupied = {entry.relative_path: entry.identity for entry in inventory.entries}
+    # Paths that this very plan removes (for example the undivided file of a
+    # session now written per day) are free for reuse; the publisher applies
+    # removals before writes. Without this, the first day of every migrated
+    # session would carry a collision suffix forever.
+    freed = {
+        item.relative_path
+        for item in plan_cleanup(
+            manifest, inventory, snapshot.sessions, snapshot.source_outcomes
+        )
+    }
     for session in snapshot.sessions:
         for entry_kind, planned_kind, directory, filename, renderer in (
             (
@@ -490,6 +501,7 @@ def build_publication_plan(
             )
             if (
                 desired in occupied
+                and desired not in freed
                 and not prior_owns_desired
                 and conflicting != session.identity
             ):
@@ -529,6 +541,7 @@ def build_publication_plan(
                 continue
             writes.append(PlannedFile(desired, content, session.identity, planned_kind))
             occupied[desired] = session.identity
+            freed.discard(desired)
     removals = list(
         plan_cleanup(manifest, inventory, snapshot.sessions, snapshot.source_outcomes)
     )
@@ -604,6 +617,20 @@ def evaluate_pipeline(manifest: Manifest):
         require_git_worktree_inventory_at_head(manifest)
     except PublishError as exc:
         raise PipelineError("GIT_WORKTREE_OUTPUT_NOT_AT_HEAD") from exc
+    # Day slicing needs the inventory (hybrid keeps sessions that already have
+    # output whole) and must precede planning, reconciliation, and audit so all
+    # three see the same identities.
+    snapshot = replace(
+        snapshot,
+        sessions=slice_sessions_by_day(
+            snapshot.sessions,
+            mode=manifest.output.day_split,
+            inventory=inventory,
+            legacy_prompt_digest=lambda session: semantic_digest_for_session(
+                session, "prompts", redactor
+            ),
+        ),
+    )
     plan = build_publication_plan(manifest, snapshot, inventory, redactor)
     reconcile = reconcile_snapshot(snapshot, inventory, plan)
     indexed_plan = add_indexes(manifest, inventory, plan)

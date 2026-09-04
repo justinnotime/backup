@@ -116,6 +116,17 @@ the latter counts the retained user and assistant events together.
   `session-last-component-prefix-8`, `session-suffix-8`, and
   `node-session-sha256-12`; collision suffixes are still assigned from the
   complete normalized identity set.
+- `output.day_split`: `off` (default), `hybrid`, or `all`. With `hybrid`, a
+  session that already has any output file keeps one file per view for its
+  whole life, while a session first seen after the switch is written as one
+  history file and one prompt file per UTC day (`<day>_<name>.md`, header
+  `Day: <day>`, identity `<session>@<day>`). The cut is at UTC midnight, so a
+  day file is final once its day is over even when an agent keeps replying
+  without new input; files of past days therefore stop changing while the
+  session stays alive. `all` also slices sessions that already have output and is meant for
+  a one-time evaluation or migration run, not the scheduled writer. The
+  `extract` and `reconcile` commands accept `--day-split` to override the
+  manifest for one run.
 - `output.compatibility.rule_version`: `legacy-output/v1` grandfathers only
   exact SHA-256 values listed in `unchanged_sha256`.
   `legacy-agent-markdown/v1` instead recognizes the prior agent history,

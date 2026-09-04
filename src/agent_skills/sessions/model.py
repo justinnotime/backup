@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -16,6 +17,7 @@ SUPPORTED_HARNESSES = frozenset(
 )
 
 Harness = Literal["claude-code", "codex", "opencode", "dsh", "cursor", "openclaw"]
+_DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
 Role = Literal["user", "assistant", "peer-agent"]
 RoleHint = Literal["user-like", "assistant"]
 TimestampQuality = Literal["exact", "approximate", "unknown"]
@@ -65,8 +67,13 @@ class Session:
     ended_at: datetime | None
     events: tuple[Event, ...]
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    # Set only on a per-UTC-day slice of a longer session (see slicing.py). It
+    # becomes part of the identity, the filename date, and the ``Day`` header.
+    day: str | None = None
 
     def __post_init__(self) -> None:
+        if self.day is not None and not _DAY.fullmatch(self.day):
+            raise ValueError("day must be a YYYY-MM-DD UTC date")
         if self.schema_version != NORMALIZED_SCHEMA_VERSION:
             raise ValueError(f"unsupported session schema: {self.schema_version}")
         if self.harness not in SUPPORTED_HARNESSES:
@@ -86,7 +93,9 @@ class Session:
 
     @property
     def identity(self) -> tuple[str, str, str]:
-        return (self.harness, self.node_label, self.session_id)
+        if self.day is None:
+            return (self.harness, self.node_label, self.session_id)
+        return (self.harness, self.node_label, f"{self.session_id}@{self.day}")
 
 
 @dataclass(frozen=True, slots=True)
