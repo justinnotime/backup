@@ -462,6 +462,9 @@ class CodexDecoder:
                 "event_msg_delta",
                 "world_state",
                 "inter_agent_communication_metadata",
+                # Per-turn token accounting written by Codex since 2026-09-04;
+                # carries usage numbers only, never conversation text.
+                "token_usage_record",
             }:
                 recognized[f"ignored.{record_type}"] += 1
             else:

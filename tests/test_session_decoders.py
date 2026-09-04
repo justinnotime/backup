@@ -910,6 +910,40 @@ class CodexDecoderTest(unittest.TestCase):
         )
         self.assertNotIn("synthetic future request", repr(future.diagnostics))
 
+    def test_token_usage_record_is_explicitly_ignored(self) -> None:
+        # Codex started writing one of these after every response on
+        # 2026-09-04; an unknown top-level record marks the whole source
+        # incomplete, which aborted every hourly extraction until it was known.
+        result = self.decode(
+            codex_meta(),
+            *codex_items(),
+            {
+                "type": "token_usage_record",
+                "ordinal": 3,
+                "timestamp": "2026-09-04T00:04:34.308Z",
+                "payload": {
+                    "response_id": "synthetic-response",
+                    "root_turn_id": "synthetic-turn",
+                    "session_id": "synthetic-session",
+                    "thread_id": "synthetic-thread",
+                    "thread_token_usage": {"total_tokens": 1},
+                    "turn_id": "synthetic-turn",
+                    "turn_token_usage": {"total_tokens": 1},
+                    "usage": {"input_tokens": 1, "output_tokens": 1},
+                },
+            },
+        )
+
+        self.assertEqual(result.completeness, "complete")
+        self.assertEqual(result.observations.unknown_record_counts, {})
+        self.assertEqual(
+            result.observations.recognized_record_counts["ignored.token_usage_record"],
+            1,
+        )
+        self.assertNotIn(
+            "CODEX_UNKNOWN_MESSAGE_FORMAT", {item.code for item in result.diagnostics}
+        )
+
     def test_operational_error_and_world_state_are_explicitly_ignored(self) -> None:
         result = self.decode(
             codex_meta(),
