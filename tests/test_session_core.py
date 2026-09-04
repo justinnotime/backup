@@ -371,6 +371,65 @@ class CleanupTest(unittest.TestCase):
             self.assertEqual(plan_cleanup(manifest, inventory, (), outcomes), ())
 
 
+    def _legacy_history(self, session_id: str) -> bytes:
+        return (
+            "# Legacy session\n\n"
+            "- Tool: claude\n"
+            "- Host: node-a\n"
+            f"- Session ID: {session_id}\n"
+            "- Time range: 2026-02-03 04:05:06Z — 2026-02-03 04:05:07Z\n\n---\n\n"
+            "### 2026-02-03 04:05:06Z — user\n\n> legacy request\n\n"
+            "### 2026-02-03 04:05:07Z — assistant\n\nlegacy answer\n"
+        ).encode()
+
+    def test_orphan_legacy_file_is_kept_under_both_legacy_rules(self) -> None:
+        # The session exists in no source any more: Raw/ is its only copy.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = self._manifest(root, scope="owner")
+            outcomes = (SourceOutcome("source-a", "node-a", "success", 1, 0),)
+            for rule in ("legacy-agent-markdown/v1", "legacy-agent-markdown-frozen/v1"):
+                manifest = replace(base, output=replace(base.output, compatibility_rule=rule))
+                inventory = OutputInventory(
+                    (
+                        entry_from_content(
+                            "History/2026-02/2026-02-03_orphan.md",
+                            self._legacy_history("session-orphan"),
+                            compatibility_rule=rule,
+                            legacy_kind="history",
+                            legacy_harness="claude-code",
+                        ),
+                    )
+                )
+                self.assertTrue(inventory.entries[0].grandfathered)
+                self.assertEqual(plan_cleanup(manifest, inventory, (), outcomes), ())
+
+    def test_superseded_legacy_whole_file_is_removed_when_its_session_is_current_per_day(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = self._manifest(root, scope="owner")
+            outcomes = (SourceOutcome("source-a", "node-a", "success", 1, 1),)
+            for rule in ("legacy-agent-markdown/v1", "legacy-agent-markdown-frozen/v1"):
+                manifest = replace(base, output=replace(base.output, compatibility_rule=rule))
+                inventory = OutputInventory(
+                    (
+                        entry_from_content(
+                            "History/2026-02/2026-02-03_whole.md",
+                            self._legacy_history("session-000000000001"),
+                            compatibility_rule=rule,
+                            legacy_kind="history",
+                            legacy_harness="claude-code",
+                        ),
+                    )
+                )
+                current = (replace(session(harness="claude-code", node="node-a"), day="2026-02-03"),)
+                self.assertEqual(current[0].identity[2], "session-000000000001@2026-02-03")
+                removals = plan_cleanup(manifest, inventory, current, outcomes)
+                self.assertEqual(
+                    [item.relative_path for item in removals],
+                    ["History/2026-02/2026-02-03_whole.md"],
+                )
+
 class PreservedOutputTest(unittest.TestCase):
     def _manifest(self, root: Path):
         source = root / "source"
