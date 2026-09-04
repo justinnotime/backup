@@ -117,10 +117,13 @@ the latter counts the retained user and assistant events together.
   `node-session-sha256-12`; collision suffixes are still assigned from the
   complete normalized identity set.
 - `output.day_split`: `off` (default), `hybrid`, or `all`. With `hybrid`, a
-  session that already has any output file keeps one file per view for its
-  whole life, while a session first seen after the switch is written as one
-  history file and one prompt file per UTC day (`<day>_<name>.md`, header
-  `Day: <day>`, identity `<session>@<day>`). The cut is at UTC midnight, so a
+  session that already has a whole-session history file keeps that file for
+  the days it already covers (up to the last day before the current UTC day;
+  on the switch-over day the current day's events move out of it, after which
+  the file never changes again), and every later day is written as one history
+  file and one prompt file per UTC day (`<day>_<name>.md`, header
+  `Day: <day>`, identity `<session>@<day>`). A session first seen after the
+  switch is per-day from its first day. The cut is at UTC midnight, so a
   day file is final once its day is over even when an agent keeps replying
   without new input; files of past days therefore stop changing while the
   session stays alive. `all` also slices sessions that already have output and is meant for

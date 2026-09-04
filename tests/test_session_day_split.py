@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime
 from pathlib import Path
 
@@ -11,7 +12,9 @@ from session_test_support import manifest_data, write_manifest
 from agent_skills.sessions.api import run
 from agent_skills.sessions.identity import base_filename, date_for
 from agent_skills.sessions.model import NORMALIZED_SCHEMA_VERSION, Event, Session
-from agent_skills.sessions.slicing import slice_sessions_by_day, split_session
+from agent_skills.sessions import slicing
+from agent_skills.sessions.audit import InventoryEntry
+from agent_skills.sessions.slicing import _legacy_end_day, slice_sessions_by_day, split_session
 
 
 def ts(text: str) -> datetime:
@@ -148,6 +151,21 @@ def write_multiday_claude(path: Path, *, session_id="claude-session-multi", days
                 "message": {"content": [{"type": "text", "text": "second day answer"}]},
             },
         ]
+    if days >= 3:
+        records += [
+            {
+                "type": "user",
+                "sessionId": session_id,
+                "cwd": cwd,
+                "timestamp": "2026-02-05T09:00:00Z",
+                "message": {"content": "third day request"},
+            },
+            {
+                "type": "assistant",
+                "timestamp": "2026-02-05T09:01:00Z",
+                "message": {"content": [{"type": "text", "text": "third day answer"}]},
+            },
+        ]
     path.write_text("".join(json.dumps(item) + "\n" for item in records), encoding="utf-8")
 
 
@@ -215,20 +233,79 @@ class DaySplitPipelineTest(unittest.TestCase):
         self.assertEqual((again.write_count, again.removal_count), (0, 0))
         self.assertEqual(len(self.history_files()), 2)
 
-    def test_hybrid_keeps_a_session_with_existing_output_whole_as_it_grows(self):
-        write_multiday_claude(self.source / "session.jsonl", days=1)
+    def test_hybrid_existing_file_keeps_its_days_and_later_days_become_day_files(self):
         run(self.manifest("off"))
-        self.assertEqual(len(self.history_files()), 1)
-        # The session continues on the next day after the switch to hybrid.
-        write_multiday_claude(self.source / "session.jsonl", days=2)
-        report = run(self.manifest("hybrid"))
+        (whole,) = self.history_files()
+        frozen = whole.read_bytes()
+        # Switch over on a later day: the old file already ends before today, so
+        # nothing moves and nothing is written.
+        with mock.patch.object(slicing, "_today", return_value="2026-02-05"):
+            report = run(self.manifest("hybrid"))
+        self.assertEqual((report.write_count, report.removal_count), (0, 0))
+        self.assertEqual(self.history_files(), [whole])
+        # The session continues on a third day: that day gets its own file while
+        # the old file stays byte-identical.
+        write_multiday_claude(self.source / "session.jsonl", days=3)
+        with mock.patch.object(slicing, "_today", return_value="2026-02-06"):
+            report = run(self.manifest("hybrid"))
         self.assertEqual(report.removal_count, 0)
         files = self.history_files()
-        self.assertEqual(len(files), 1)
-        text = files[0].read_text(encoding="utf-8")
-        self.assertIn("second day request", text)
-        self.assertNotIn("- Day:", text)
-        self.assertEqual(len(self.prompt_files()), 1)
+        self.assertEqual(len(files), 2)
+        self.assertEqual(whole.read_bytes(), frozen)
+        third = [path for path in files if path != whole][0]
+        self.assertTrue(third.name.startswith("2026-02-05_"))
+        text = third.read_text(encoding="utf-8")
+        self.assertIn("- Day: 2026-02-05", text)
+        self.assertIn("third day request", text)
+        self.assertNotIn("second day request", text)
+        prompts = self.prompt_files()
+        self.assertEqual(len(prompts), 2)
+        self.assertTrue(any(path.name.startswith("2026-02-05_") for path in prompts))
+
+    def test_hybrid_switch_on_the_current_day_moves_that_day_out_of_the_old_file_once(self):
+        run(self.manifest("off"))
+        (whole,) = self.history_files()
+        self.assertIn("second day request", whole.read_text(encoding="utf-8"))
+        with mock.patch.object(slicing, "_today", return_value="2026-02-04"):
+            report = run(self.manifest("hybrid"))
+        self.assertEqual(report.status, "ok")
+        files = self.history_files()
+        self.assertEqual(len(files), 2)
+        old_text = whole.read_text(encoding="utf-8")
+        self.assertIn("first day request", old_text)
+        self.assertNotIn("answer continues past midnight", old_text)
+        self.assertNotIn("second day request", old_text)
+        self.assertIn("- Ended: 2026-02-03 23:51:00Z", old_text)
+        self.assertNotIn("- Day:", old_text)
+        day_file = [path for path in files if path != whole][0]
+        self.assertTrue(day_file.name.startswith("2026-02-04_"))
+        day_text = day_file.read_text(encoding="utf-8")
+        self.assertIn("answer continues past midnight", day_text)
+        self.assertIn("second day request", day_text)
+        self.assertIn("- Day: 2026-02-04", day_text)
+        frozen = whole.read_bytes()
+        # Same day again: nothing to do. Next day: the boundary is the old
+        # file's end day, so the current-day file stays and a new one appears.
+        with mock.patch.object(slicing, "_today", return_value="2026-02-04"):
+            again = run(self.manifest("hybrid"))
+        self.assertEqual((again.write_count, again.removal_count), (0, 0))
+        write_multiday_claude(self.source / "session.jsonl", days=3)
+        with mock.patch.object(slicing, "_today", return_value="2026-02-05"):
+            run(self.manifest("hybrid"))
+        self.assertEqual(len(self.history_files()), 3)
+        self.assertEqual(whole.read_bytes(), frozen)
+        self.assertIn("second day request", day_file.read_text(encoding="utf-8"))
+
+    def test_legacy_end_day_reads_ended_or_time_range_headers(self):
+        def entry(headers):
+            return InventoryEntry("Raw/x.md", "0" * 64, ("claude-code", "n", "s"), "history", headers, "t")
+
+        self.assertEqual(_legacy_end_day(entry({"Ended": "2026-09-04 06:00:34Z"})), "2026-09-04")
+        self.assertEqual(
+            _legacy_end_day(entry({"Time range": "2026-08-01 06:36:03Z — 2026-08-02 05:43:16Z"})),
+            "2026-08-02",
+        )
+        self.assertIsNone(_legacy_end_day(entry({"Session ID": "abc"})))
 
     def test_all_replaces_an_existing_whole_file_with_slices(self):
         run(self.manifest("off"))

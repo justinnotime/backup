@@ -17,11 +17,12 @@ cannot be anchored to a day and stay whole.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import replace
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
-from .audit import OutputInventory
+from .audit import InventoryEntry, OutputInventory
 from .manifest import DAY_SPLIT_MODES
 from .model import Session
 
@@ -58,38 +59,93 @@ def split_session(session: Session) -> tuple[Session, ...]:
     return tuple(result)
 
 
+def _legacy_end_day(entry: InventoryEntry) -> str | None:
+    """Last UTC day a whole-session file covers, from its Ended or Time range header."""
+    for key in ("Ended", "Time range"):
+        dates = re.findall(r"\d{4}-\d{2}-\d{2}", entry.headers.get(key, ""))
+        if dates:
+            return max(dates)
+    return None
+
+
+def _today() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%d")
+
+
 def slice_sessions_by_day(
     sessions: tuple[Session, ...],
     *,
     mode: str,
     inventory: OutputInventory | None = None,
     legacy_prompt_digest: Callable[[Session], str] | None = None,
+    today: str | None = None,
 ) -> tuple[Session, ...]:
     """Apply the configured ``day_split`` mode to deduplicated sessions.
 
-    ``hybrid`` keeps a session whole when the inventory already holds output
-    for its undivided identity (any legacy or current-format file, or an
-    identity-less legacy prompt file matched by semantic digest); every other
-    session is sliced, which is what makes the rule stable run after run.
+    ``hybrid``: a session that already has a whole-session history file keeps
+    that file for the days it already covers, up to and including the last day
+    before ``today``; every later day becomes its own day file. The boundary is
+    ``min(end day of the existing file, yesterday)``, so on the cutover day the
+    current day's events move out of the old file (which is rewritten once and
+    then never changes) and on later days the boundary is simply the old file's
+    end day, which no longer advances. A session with only an identity-less
+    legacy prompt file (matched by semantic digest) stays whole. Every other
+    session is sliced. ``all`` slices everything, ``off`` changes nothing.
     """
     if mode not in DAY_SPLIT_MODES:
         raise ValueError("unsupported day split mode")
     if mode == "off":
         return tuple(sessions)
-    keep_whole: set[tuple[str, str, str]] = set()
+    today = today or _today()
+    yesterday = (datetime.strptime(today, "%Y-%m-%d") - timedelta(days=1)).strftime(
+        "%Y-%m-%d"
+    )
+    legacy_history: dict[tuple[str, str, str], InventoryEntry] = {}
+    legacy_prompt_identities: set[tuple[str, str, str]] = set()
     legacy_digests: set[str] = set()
     if mode == "hybrid" and inventory is not None:
         for entry in inventory.entries:
-            if entry.kind not in {"history", "prompts"}:
+            if entry.kind not in {"history", "prompts"} or entry.headers.get("Day"):
                 continue
-            if entry.identity is not None:
-                if not entry.headers.get("Day"):
-                    keep_whole.add(entry.identity)
-            elif entry.kind == "prompts" and entry.semantic_digest is not None:
-                legacy_digests.add(entry.semantic_digest)
+            if entry.identity is None:
+                if entry.kind == "prompts" and entry.semantic_digest is not None:
+                    legacy_digests.add(entry.semantic_digest)
+            elif entry.kind == "history":
+                legacy_history[entry.identity] = entry
+            else:
+                legacy_prompt_identities.add(entry.identity)
     result: list[Session] = []
     for session in sessions:
-        if session.identity in keep_whole:
+        entry = legacy_history.get(session.identity)
+        if entry is not None:
+            end_day = _legacy_end_day(entry)
+            if end_day is None:
+                result.append(session)
+                continue
+            boundary = min(end_day, yesterday)
+            head = [
+                event
+                for event in session.events
+                if _day(event.timestamp) is None or _day(event.timestamp) <= boundary
+            ]
+            tail = [
+                event
+                for event in session.events
+                if _day(event.timestamp) is not None and _day(event.timestamp) > boundary
+            ]
+            if head:
+                stamps = [event.timestamp for event in head if event.timestamp]
+                result.append(
+                    replace(
+                        session,
+                        events=tuple(head),
+                        ended_at=max(stamps) if stamps else session.ended_at,
+                    )
+                )
+            if tail:
+                result.extend(split_session(replace(session, events=tuple(tail))))
+            continue
+        if session.identity in legacy_prompt_identities:
             result.append(session)
             continue
         if (
