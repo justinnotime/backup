@@ -153,6 +153,24 @@ def _has_unknown_direct_text_shape(content: Any) -> bool:
     )
 
 
+_CONVERSATION_NAME_TOKENS = ("user", "assistant", "message")
+
+
+def _may_carry_conversation(record_type: Any, record: Mapping[str, Any]) -> bool:
+    """True when an unhandled record could hold conversation text.
+
+    A missing or non-string type, a "message" envelope, or a type name that
+    says user/assistant/message keeps the fail-closed behaviour: the record
+    is reported as unknown and the source stays incomplete.
+    """
+    if not isinstance(record_type, str) or not record_type:
+        return True
+    if "message" in record:
+        return True
+    name = record_type.lower()
+    return any(token in name for token in _CONVERSATION_NAME_TOKENS)
+
+
 def _message_key(record: Mapping[str, Any]) -> str | None:
     for key in ("uuid", "id"):
         value = record.get(key)
@@ -380,35 +398,17 @@ class ClaudeDecoder:
                         queues.append((sequence, record, content.strip()))
                     else:
                         recognized["queue-operation.synthetic"] += 1
-            elif record_type in {
-                "summary",
-                "system",
-                "progress",
-                "attachment",
-                "bridge-session",
-                "file-history-snapshot",
-                "ai-title",
-                "agent-name",
-                "agent-setting",
-                "atis-latch",
-                "cost-state",
-                "file-history-delta",
-                "last-prompt",
-                "mode",
-                "permission-mode",
-                "pr-link",
-                "relocated",
-                "result",
-                "started",
-                "worktree-state",
-                # Written when a conversation continues in another session
-                # (seen 2026-09-05); carries session identifiers only, never
-                # conversation text.
-                "continued-in",
-            }:
-                recognized[f"ignored.{record_type}"] += 1
-            else:
+            elif _may_carry_conversation(record_type, record):
                 unknown[str(record_type or "missing-type")] += 1
+            else:
+                # Every Claude Code record that carries conversation text puts
+                # it under "message" (user, assistant) or, for queued commands,
+                # top-level "content", which is handled above. Anything else is
+                # session bookkeeping (title, cost, permission mode, worktree
+                # state, continuation pointer, ...) and is ignored by shape
+                # rather than by an allowlist of type names, so a new
+                # bookkeeping record never stops an extraction.
+                recognized[f"ignored.{record_type}"] += 1
 
         for sequence, record, text in queues:
             if text in direct_user_texts:

@@ -131,6 +131,30 @@ def _is_real_user_text(text: str, prefixes: tuple[str, ...]) -> bool:
     return bool(text) and not text.startswith(prefixes)
 
 
+_CONVERSATION_NAME_TOKENS = ("user", "message")
+
+
+def _may_carry_conversation(record_type: Any, record: Mapping[str, Any]) -> bool:
+    """True when an unhandled top-level record could hold conversation text.
+
+    A missing or non-string type, a non-empty string payload, a payload with a
+    message/item/content key, or a type name that says user/message keeps the
+    fail-closed behaviour: the record is reported as unknown and the source
+    stays incomplete.
+    """
+    if not isinstance(record_type, str) or not record_type:
+        return True
+    payload = record.get("payload")
+    if isinstance(payload, str):
+        return bool(payload.strip())
+    if isinstance(payload, dict) and any(
+        key in payload for key in ("message", "item", "content")
+    ):
+        return True
+    name = record_type.lower()
+    return any(token in name for token in _CONVERSATION_NAME_TOKENS)
+
+
 def _message_key(value: Mapping[str, Any]) -> str | None:
     for key in ("id", "item_id", "message_id"):
         candidate = value.get(key)
@@ -456,19 +480,19 @@ class CodexDecoder:
                 else:
                     recognized["response_item.ignored.other"] += 1
                 continue
-            if record_type in {
-                "turn_context",
-                "compacted",
-                "event_msg_delta",
-                "world_state",
-                "inter_agent_communication_metadata",
-                # Per-turn token accounting written by Codex since 2026-09-04;
-                # carries usage numbers only, never conversation text.
-                "token_usage_record",
-            }:
+            if record_type in {"compacted", "event_msg_delta"}:
+                # Compaction summaries carry model-generated context under
+                # "message", and deltas restate event_msg content; neither is
+                # conversation, so they stay explicitly ignored.
                 recognized[f"ignored.{record_type}"] += 1
-            else:
+            elif _may_carry_conversation(record_type, record):
                 unknown[str(record_type or "missing-type")] += 1
+            else:
+                # Other top-level bookkeeping (turn context, world state,
+                # token accounting, agent-communication metadata, ...) is
+                # ignored by shape rather than by an allowlist of type names,
+                # so a new bookkeeping record never stops an extraction.
+                recognized[f"ignored.{record_type}"] += 1
 
         nonempty = [(name, events) for name, events in streams.items() if events]
         diagnostics: list[Diagnostic] = []

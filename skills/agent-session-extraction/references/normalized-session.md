@@ -42,8 +42,13 @@ publication through reconciliation.
 
 A decoder receives a stable `SourceSnapshot` and returns `DecodeBatch`.
 It does not discover undeclared sources, decide cleanup, infer a consumer,
-write files, or print transcript text. Unknown message-like records appear in
-`FormatObservations.unknown_record_counts`; required malformed input makes the
+write files, or print transcript text. An unrecognized record whose shape or
+name says it may carry conversation text (for example a Claude Code record with
+a `message` envelope, or a Codex payload with a `message`, `item`, or `content`
+key) appears in `FormatObservations.unknown_record_counts` and makes the batch
+incomplete. Any other unrecognized record is session bookkeeping and is counted
+under `recognized_record_counts` as `ignored.<type>`, so a harness adding a new
+bookkeeping record does not stop extraction. Required malformed input makes the
 batch incomplete or invalid and blocks publication.
 
 `agent_skills.sessions.api.decode_source_snapshots` is the public parity

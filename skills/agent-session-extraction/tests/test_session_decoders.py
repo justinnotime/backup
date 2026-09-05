@@ -459,32 +459,69 @@ class ClaudeDecoderTest(unittest.TestCase):
             ],
         )
 
-    def test_unknown_future_record_remains_visible(self) -> None:
-        result = ClaudeDecoder().decode(
-            snapshot(
-                "claude-code",
-                jsonl(
-                    {
-                        "type": "user",
-                        "sessionId": "claude-session-example",
-                        "message": {"content": "synthetic direct request"},
-                    },
-                    {
-                        "type": "future-session-metadata",
-                        "futureField": "synthetic opaque value",
-                    },
-                ),
+    def test_unknown_record_is_metadata_unless_shape_or_name_says_conversation(
+        self,
+    ) -> None:
+        def decode(extra: dict):
+            return ClaudeDecoder().decode(
+                snapshot(
+                    "claude-code",
+                    jsonl(
+                        {
+                            "type": "user",
+                            "sessionId": "claude-session-example",
+                            "message": {"content": "synthetic direct request"},
+                        },
+                        extra,
+                    ),
+                )
             )
+
+        # A never-seen record without a message envelope is bookkeeping: it is
+        # counted, visible, and does not stop the extraction.
+        bookkeeping = decode(
+            {"type": "future-session-metadata", "futureField": "synthetic opaque value"}
+        )
+        self.assertEqual(bookkeeping.completeness, "complete")
+        self.assertEqual(bookkeeping.observations.unknown_record_counts, {})
+        self.assertEqual(
+            bookkeeping.observations.recognized_record_counts[
+                "ignored.future-session-metadata"
+            ],
+            1,
+        )
+        self.assertNotIn(
+            "CLAUDE_UNKNOWN_RECORD", {item.code for item in bookkeeping.diagnostics}
         )
 
-        self.assertEqual(result.completeness, "incomplete")
+        # The same unknown type carrying a message envelope fails closed.
+        with_message = decode(
+            {
+                "type": "future-session-metadata",
+                "message": {"content": "synthetic future request"},
+            }
+        )
+        self.assertEqual(with_message.completeness, "incomplete")
         self.assertEqual(
-            result.observations.unknown_record_counts,
+            with_message.observations.unknown_record_counts,
             {"future-session-metadata": 1},
         )
         self.assertIn(
-            "CLAUDE_UNKNOWN_RECORD", {item.code for item in result.diagnostics}
+            "CLAUDE_UNKNOWN_RECORD", {item.code for item in with_message.diagnostics}
         )
+        self.assertNotIn("synthetic future request", repr(with_message.diagnostics))
+
+        # A type whose name says it is conversation fails closed even without
+        # a message envelope, as does a record with no type at all.
+        for record in (
+            {"type": "future-user-note", "note": "synthetic note"},
+            {"futureField": "synthetic opaque value"},
+        ):
+            result = decode(record)
+            self.assertEqual(result.completeness, "incomplete", record)
+            self.assertIn(
+                "CLAUDE_UNKNOWN_RECORD", {item.code for item in result.diagnostics}
+            )
 
     def test_continued_in_record_is_explicitly_ignored(self) -> None:
         # Claude Code started writing one of these when a conversation
@@ -976,6 +1013,47 @@ class CodexDecoderTest(unittest.TestCase):
         self.assertNotIn(
             "CODEX_UNKNOWN_MESSAGE_FORMAT", {item.code for item in result.diagnostics}
         )
+
+    def test_unknown_top_level_record_is_metadata_unless_message_like(self) -> None:
+        # A never-seen top-level record whose payload has no message, item, or
+        # content key and whose name does not say user/message is bookkeeping.
+        bookkeeping = self.decode(
+            codex_meta(),
+            *codex_items(),
+            {"type": "future_bookkeeping", "ordinal": 1, "payload": {"counter": 1}},
+        )
+        self.assertEqual(bookkeeping.completeness, "complete")
+        self.assertEqual(bookkeeping.observations.unknown_record_counts, {})
+        self.assertEqual(
+            bookkeeping.observations.recognized_record_counts[
+                "ignored.future_bookkeeping"
+            ],
+            1,
+        )
+        self.assertNotIn(
+            "CODEX_UNKNOWN_MESSAGE_FORMAT",
+            {item.code for item in bookkeeping.diagnostics},
+        )
+
+        # Message-like shape, conversation-like name, string payload, or a
+        # missing type all keep the fail-closed behaviour.
+        for record in (
+            {
+                "type": "future_bookkeeping",
+                "payload": {"message": "synthetic future request"},
+            },
+            {"type": "future_user_record", "payload": {"counter": 1}},
+            {"type": "future_note", "payload": "synthetic future request"},
+            {"payload": {"counter": 1}},
+        ):
+            result = self.decode(codex_meta(), *codex_items(), record)
+            self.assertEqual(result.completeness, "incomplete", record)
+            self.assertIn(
+                "CODEX_UNKNOWN_MESSAGE_FORMAT",
+                {item.code for item in result.diagnostics},
+                record,
+            )
+            self.assertNotIn("synthetic future request", repr(result.diagnostics))
 
     def test_operational_error_and_world_state_are_explicitly_ignored(self) -> None:
         result = self.decode(
