@@ -170,6 +170,24 @@ Validate every new or changed Skill with the Skill Creator validator before
 publishing it. Dependency installation and validation artifacts belong in the
 individual package or a disposable workspace, never a root shared environment.
 
+## Continuous integration
+
+[Skill CI](.github/workflows/skills-ci.yml) runs on pushes, pull requests, and
+manual requests. Each tested package is copied to an isolated directory and
+uses only its own source, tests, and declared Python dependencies. The workflow
+does not need private configuration, accounts, archive data, or credentials.
+
+Python packages run on their minimum supported version and Python 3.14. The
+session job installs `git-crypt`, and Python 3.14 also exercises standard-library
+Zstandard support. Backup and profile installation run their package-owned
+tests with synthetic temporary homes and external commands. Clipboard and
+Syncthing helpers currently receive shell syntax checks only; their real
+desktop/network integrations are not exercised by CI.
+
+Use the package commands above to reproduce checks. GitHub's Actions and pull
+request pages show the actual run results. With working CI, pull requests may
+be used for future changes; bootstrapping CI does not require a pull request.
+
 ## GitHub archive
 
 The `github-archive` Skill contains its own Python package, dependencies, and

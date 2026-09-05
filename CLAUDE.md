@@ -3,11 +3,13 @@
 `CLAUDE.md` is the canonical repository contract. `AGENTS.md` must remain a
 relative symbolic link to this file so every supported agent reads one copy.
 
-This repository does not use pull requests. For authorized work, make and
-verify changes in a sibling task worktree, then push the verified commits
-directly to `main`. Synchronize the clean primary checkout by fast-forwarding.
-Do not import another repository's PR or merge-approval workflow here. Keep
-the existing GitHub account identity and use its public-safe commit email.
+Make and verify changes in a sibling task worktree. Pull requests may be used
+when CI runs the checks for the affected Skills; inspect actual results before
+reporting success. Without working CI, publish verified, authorized changes
+directly to `main`. Initial CI setup and explicitly authorized direct updates
+may also use that path. Synchronize the clean primary checkout by
+fast-forwarding. Do not import another repository's approval workflow here.
+Keep the existing GitHub account identity and its public-safe commit email.
 
 For requests about additional harness roots, scheduled backups, exclusions,
 destination compatibility, or Syncthing layout, read `PROFILES.md` before
@@ -39,3 +41,9 @@ supported, but do not add root runtime frameworks or source compatibility links.
 Run checks from the affected package using its own dependencies. The root
 README lists package commands; it is not a shared test runner or dependency
 project. Keep generated test output and environments outside tracked sources.
+
+The GitHub Actions workflow only coordinates package-owned checks. Run tests
+on GitHub-hosted runners with synthetic inputs, read-only repository access,
+and no personal credentials or source directories. Copy each tested package
+without its siblings so CI also checks package isolation. Shell syntax checks
+alone do not establish that a clipboard or Syncthing integration works.
