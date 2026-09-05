@@ -3,6 +3,12 @@
 `CLAUDE.md` is the canonical repository contract. `AGENTS.md` must remain a
 relative symbolic link to this file so every supported agent reads one copy.
 
+This repository does not use pull requests. For authorized work, make and
+verify changes in a sibling task worktree, then push the verified commits
+directly to `main`. Synchronize the clean primary checkout by fast-forwarding.
+Do not import another repository's PR or merge-approval workflow here. Keep
+the existing GitHub account identity and use its public-safe commit email.
+
 For requests about additional harness roots, scheduled backups, exclusions,
 destination compatibility, or Syncthing layout, read `PROFILES.md` before
 changing files. Run `bash skills/state-backup/tests/run.sh` and its package-local
