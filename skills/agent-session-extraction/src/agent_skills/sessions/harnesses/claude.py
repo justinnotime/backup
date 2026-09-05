@@ -401,6 +401,10 @@ class ClaudeDecoder:
                 "result",
                 "started",
                 "worktree-state",
+                # Written when a conversation continues in another session
+                # (seen 2026-09-05); carries session identifiers only, never
+                # conversation text.
+                "continued-in",
             }:
                 recognized[f"ignored.{record_type}"] += 1
             else:

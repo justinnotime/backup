@@ -486,6 +486,39 @@ class ClaudeDecoderTest(unittest.TestCase):
             "CLAUDE_UNKNOWN_RECORD", {item.code for item in result.diagnostics}
         )
 
+    def test_continued_in_record_is_explicitly_ignored(self) -> None:
+        # Claude Code started writing one of these when a conversation
+        # continues in another session (2026-09-05); an unknown top-level
+        # record marks the whole source incomplete, which aborted every
+        # hourly extraction until it was known.
+        result = ClaudeDecoder().decode(
+            snapshot(
+                "claude-code",
+                jsonl(
+                    {
+                        "type": "user",
+                        "sessionId": "claude-session-example",
+                        "message": {"content": "synthetic direct request"},
+                    },
+                    {
+                        "type": "continued-in",
+                        "timestamp": "2026-09-05T05:30:09.955Z",
+                        "sessionId": "claude-session-example",
+                        "continuedInSessionId": "claude-session-continuation",
+                    },
+                ),
+            )
+        )
+
+        self.assertEqual(result.completeness, "complete")
+        self.assertEqual(result.observations.unknown_record_counts, {})
+        self.assertEqual(
+            result.observations.recognized_record_counts["ignored.continued-in"], 1
+        )
+        self.assertNotIn(
+            "CLAUDE_UNKNOWN_RECORD", {item.code for item in result.diagnostics}
+        )
+
     def test_only_exact_malformed_line_hashes_can_be_grandfathered(self) -> None:
         malformed_line = b'{"type":"synthetic-broken"'
         payload = (
