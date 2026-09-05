@@ -1,10 +1,10 @@
 # Shared Agent Harness Skills
 
-This repository retains its `backup` name and stable backup entrypoints while
-growing into a collection of deterministic agent-harness Skills. It contains a
-state backup, Syncthing diagnostics, a remote clipboard helper, and a shared
-session-extraction runtime, and a configurable GitHub archive. It also provides generic setup helpers for named
-harness roots; callers retain all label meaning in their own configuration.
+`skills` is a collection of independent, deterministic agent-harness Skills.
+It contains state backup, Syncthing diagnostics, a remote clipboard helper, a
+shared session-extraction runtime, and a configurable GitHub archive. It also
+provides generic setup helpers for named harness roots; callers retain all
+label meaning in their own configuration.
 
 The repository works in both shapes:
 
@@ -13,6 +13,25 @@ The repository works in both shapes:
 
 Labels are opaque. This repository does not assign account, organization, or
 trust semantics to them.
+
+## Repository name transition
+
+The GitHub repository was renamed from `backup` to `skills`. Existing local
+directories may keep the name `backup`; the examples below retain that path so
+existing scheduler entries and shell links continue to work. `backup.sh`,
+`~/bin/backup`, `~/.config/backup/config`, and backup destination names remain
+stable interfaces.
+
+Update a clone's remote independently of its local directory name:
+
+```bash
+git -C "$HOME/src/backup" remote set-url origin https://github.com/justinnotime/skills.git
+```
+
+[GitHub redirects the old repository URL](https://docs.github.com/en/repositories/creating-and-managing-repositories/renaming-a-repository),
+including clone, fetch, and push. Its documentation states no fixed transition
+period. Do not create another repository under the former `backup` name:
+reusing that name removes the redirect.
 
 ## Repository map
 
@@ -59,7 +78,7 @@ not create an access-control boundary.
 ## Quick start: native defaults
 
 ```bash
-git clone https://github.com/justinnotime/backup.git "$HOME/src/backup"
+git clone https://github.com/justinnotime/skills.git "$HOME/src/backup"
 mkdir -p "$HOME/bin"
 ln -s "$HOME/src/backup/backup.sh" "$HOME/bin/backup"
 "$HOME/bin/backup"
