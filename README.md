@@ -16,16 +16,18 @@ trust semantics to them.
 
 ## Repository name transition
 
-The GitHub repository was renamed from `backup` to `skills`. Existing local
-directories may keep the name `backup`; the examples below retain that path so
-existing scheduler entries and shell links continue to work. `backup.sh`,
-`~/bin/backup`, `~/.config/backup/config`, and backup destination names remain
-stable interfaces.
-
-Update a clone's remote independently of its local directory name:
+The GitHub repository was renamed from `backup` to `skills`, and the examples
+below use `$HOME/src/skills` as the local checkout. A clone that still lives in
+a directory named `backup` keeps working: `backup.sh`, `~/bin/backup`,
+`~/.config/backup/config`, and backup destination names remain stable
+interfaces. To move such a clone, repoint its remote, rename the directory,
+refresh the shell link, and update any scheduler entry that names the old path:
 
 ```bash
 git -C "$HOME/src/backup" remote set-url origin https://github.com/justinnotime/skills.git
+mv "$HOME/src/backup" "$HOME/src/skills"
+git -C "$HOME/src/skills" worktree repair
+ln -sfn "$HOME/src/skills/backup.sh" "$HOME/bin/backup"
 ```
 
 [GitHub redirects the old repository URL](https://docs.github.com/en/repositories/creating-and-managing-repositories/renaming-a-repository),
@@ -78,9 +80,9 @@ not create an access-control boundary.
 ## Quick start: native defaults
 
 ```bash
-git clone https://github.com/justinnotime/skills.git "$HOME/src/backup"
+git clone https://github.com/justinnotime/skills.git "$HOME/src/skills"
 mkdir -p "$HOME/bin"
-ln -s "$HOME/src/backup/backup.sh" "$HOME/bin/backup"
+ln -s "$HOME/src/skills/backup.sh" "$HOME/bin/backup"
 "$HOME/bin/backup"
 ```
 
@@ -93,7 +95,7 @@ Without a config file, the script uses the upstream default state locations,
 ```bash
 mkdir -p "$HOME/.config/backup"
 ${EDITOR:-vi} "$HOME/.config/backup/config"
-"$HOME/src/backup/backup.sh"
+"$HOME/src/skills/backup.sh"
 ```
 
 See [PROFILES.md](PROFILES.md) for the exact config, source-root, exclusion,
@@ -229,7 +231,7 @@ state, scheduling, and publication. No other Skill is required.
 over SSH, mosh, or tmux. Install it separately if needed:
 
 ```bash
-ln -s "$HOME/src/backup/clip.sh" "$HOME/.clip.sh"
+ln -s "$HOME/src/skills/clip.sh" "$HOME/.clip.sh"
 ```
 
 Source `$HOME/.clip.sh` from the applicable shell startup file. tmux 3.3 or
