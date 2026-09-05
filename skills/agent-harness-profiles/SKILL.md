@@ -13,8 +13,11 @@ configuration.
 The stable configuration interface is `~/.config/backup/config` and its existing
 `CLAUDE_PROFILES`, `CODEX_PROFILES`, `OPENCODE_PROFILES`, and `DSH_PROFILES`
 variables. A private repository may own that file or source a tracked private
-fragment from it. Read the Backup contract in
-`../state-backup/references/profiles.md` before changing the formats.
+fragment from it. Claude Code, Codex, and OpenCode lists use space-separated
+`label:/absolute/root` entries. DSH uses newline-separated entries and permits
+spaces inside the path. Labels begin with a lowercase letter or digit and use
+lowercase letters, digits, underscores, or hyphens. Labels have no implied
+account meaning.
 The configuration is trusted local shell code; path checks prevent accidental
 misconfiguration, not hostile commands in that file.
 The scripts require Bash 4+, Git, rsync, and a `realpath` implementation with
@@ -39,7 +42,8 @@ The installer:
    or credentials;
 4. links this canonical Skill into the shared and configured Claude discovery
    roots;
-5. preserves `~/bin/backup` as a link to the stable repository entrypoint;
+5. when `BACKUP_COMMAND` names an absolute executable in the configuration,
+   links `~/bin/backup` to that command; otherwise leaves that entry unchanged;
 6. runs the doctor.
 
 It does not edit shell startup files, install services or schedulers, start a
@@ -61,10 +65,16 @@ For diagnosis without mutation, run `scripts/doctor.sh --config FILE`. Use
   security boundary.
 - Keep service ports and lifecycles in their owner configuration.
 - Install only from the primary `main` checkout. Linked worktrees, detached
-  checkouts, topic branches, and uncommitted linked implementation files are
+  checkouts, topic branches, and uncommitted files in this Skill package are
   rejected before any persistent write. Git cannot identify which independent
   clone an operator considers long-lived, so invoke the installer only from the
   selected durable checkout.
 
-After changing this Skill, run `tests/run.sh`, the repository Python tests, and
-the Skill Creator validator against this directory.
+The package has no dependency on a neighboring backup implementation. To
+manage the optional command link, set `BACKUP_COMMAND=/absolute/path/to/backup.sh`
+in the local configuration. The installer checks the command's existence and
+executable permission without reading its source or managing its checkout.
+
+After changing this Skill, run `bash tests/run.sh` from this directory and the
+Skill Creator validator against this directory. Tests use a synthetic external
+command and require no sibling Skill packages.

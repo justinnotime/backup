@@ -3,7 +3,6 @@ set -euo pipefail
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly SKILL_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
-readonly REPO_ROOT="$(cd -- "${SKILL_DIR}/../.." && pwd -P)"
 readonly ORIGINAL_HOME="${HOME}"
 config_file="${BACKUP_CONFIG:-${HOME}/.config/backup/config}"
 output_file="-"
@@ -117,7 +116,7 @@ emit_dsh() {
 
 render() {
   profile_reset_root_registry
-  profile_reserve_path 'Backup checkout' "${REPO_ROOT}"
+  profile_reserve_path 'Skill checkout' "$(git -C "${SKILL_DIR}" rev-parse --show-toplevel 2>/dev/null || printf '%s' "${SKILL_DIR}")"
   profile_reserve_fixed_install_roots
   profile_reserve_native_roots
   profile_reserve_path 'profile configuration' "${config_file}"

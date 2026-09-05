@@ -8,6 +8,19 @@ description: Extract, audit, reconcile, and stage agent-harness sessions through
 Use the scripts in this package as the behavior authority. A scheduler calls
 the scripts directly; it does not invoke this Skill conversationally.
 
+This directory is the complete runtime root: `src/agent_skills`, `tests/`,
+`pyproject.toml`, and `uv.lock` belong to this package. It can be copied and
+installed independently. A consumer importing the Python API adds this
+directory's `src/` to its Python path; a configured runtime-root value names
+this Skill directory, not the containing collection repository.
+
+From this directory, install test dependencies and validate with:
+
+```bash
+uv sync --locked --extra test
+uv run --no-sync pytest tests
+```
+
 Before reading a source, require a valid versioned manifest. Treat source
 paths, node labels, ownership, project policy, cleanup authority, redaction,
 and publication as explicit configuration. Never infer a consumer realm,

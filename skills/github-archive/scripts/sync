@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+SOURCE=${BASH_SOURCE[0]}
+while [[ -L "$SOURCE" ]]; do
+  DIR=$(cd -P "$(dirname "$SOURCE")" && pwd)
+  SOURCE=$(readlink "$SOURCE")
+  [[ "$SOURCE" = /* ]] || SOURCE="$DIR/$SOURCE"
+done
+SKILL_ROOT=$(cd -P "$(dirname "$SOURCE")/.." && pwd)
+PYTHON=${GITHUB_ARCHIVE_PYTHON:-"$SKILL_ROOT/.venv/bin/python"}
+if [[ ! -x "$PYTHON" ]]; then
+  PYTHON=python3
+fi
+exec "$PYTHON" "$SKILL_ROOT/src/github_archive.py" "$@"

@@ -3,7 +3,6 @@ set -euo pipefail
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly SKILL_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
-readonly REPO_ROOT="$(cd -- "${SKILL_DIR}/../.." && pwd -P)"
 config_file="${BACKUP_CONFIG:-${HOME}/.config/backup/config}"
 errors=0
 warnings=0
@@ -42,11 +41,6 @@ if command -v realpath >/dev/null 2>&1; then
 fi
 command -v sqlite3 >/dev/null 2>&1 || warn 'sqlite3 is unavailable; OpenCode Backup uses its fallback copy path'
 
-if [[ -x "${REPO_ROOT}/backup.sh" ]]; then
-  ok 'stable Backup entrypoint'
-else
-  error 'stable Backup entrypoint is unavailable'
-fi
 for script in "${SCRIPT_DIR}"/*.sh; do
   if bash -n "${script}"; then
     ok "script syntax: ${script##*/}"
@@ -58,6 +52,8 @@ done
 if [[ -f "${config_file}" ]]; then
   if bash -n "${config_file}"; then
     ok 'configuration syntax'
+    # The same trusted local shell configuration is read by every command.
+    source "${config_file}"
   else
     error 'configuration syntax'
   fi
@@ -78,13 +74,17 @@ else
   warn 'shared Skill link is not installed from this checkout'
 fi
 
-backup_target="${HOME}/bin/backup"
-if [[ -L "${backup_target}" && "$(readlink -f -- "${backup_target}" 2>/dev/null || true)" == "$(readlink -f -- "${REPO_ROOT}/backup.sh")" ]]; then
-  ok 'stable Backup command link'
-elif [[ -e "${backup_target}" || -L "${backup_target}" ]]; then
-  error "divergent Backup command target: ${backup_target}"
-else
-  warn 'stable Backup command link is not installed'
+if [[ -n "${BACKUP_COMMAND:-}" ]]; then
+  backup_target="${HOME}/bin/backup"
+  if [[ "${BACKUP_COMMAND}" != /* || ! -x "${BACKUP_COMMAND}" || ! -f "${BACKUP_COMMAND}" ]]; then
+    error 'BACKUP_COMMAND must name an absolute executable command'
+  elif [[ -L "${backup_target}" && "$(readlink -f -- "${backup_target}" 2>/dev/null || true)" == "$(readlink -f -- "${BACKUP_COMMAND}")" ]]; then
+    ok 'configured Backup command link'
+  elif [[ -e "${backup_target}" || -L "${backup_target}" ]]; then
+    error "divergent Backup command target: ${backup_target}"
+  else
+    warn 'configured Backup command link is not installed'
+  fi
 fi
 
 printf 'Doctor summary: %d error(s), %d warning(s)\n' "${errors}" "${warnings}"

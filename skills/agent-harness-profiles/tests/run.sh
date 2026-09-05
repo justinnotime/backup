@@ -5,10 +5,7 @@ readonly ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 readonly TEMP_ROOT="$(mktemp -d)"
 
 cleanup() {
-  case "${TEMP_ROOT}" in
-    /tmp/*) rm -rf -- "${TEMP_ROOT}" ;;
-    *) printf 'refusing unsafe test cleanup: %s\n' "${TEMP_ROOT}" >&2 ;;
-  esac
+  rm -rf -- "${TEMP_ROOT}"
 }
 trap cleanup EXIT
 
@@ -36,11 +33,9 @@ assert_link_target() {
 copy_primary_checkout() {
   local checkout=$1
   install -d -m 0700 "${checkout}/skills"
-  cp -a -- "${ROOT_DIR}/backup.sh" "${checkout}/backup.sh"
-  cp -a -- "${ROOT_DIR}/skills/agent-harness-profiles" \
-    "${checkout}/skills/agent-harness-profiles"
-  cp -a -- "${ROOT_DIR}/skills/state-backup" \
-    "${checkout}/skills/state-backup"
+  cp -a -- "${ROOT_DIR}" "${checkout}/skills/agent-harness-profiles"
+  printf '#!/usr/bin/env sh\nexit 0\n' > "${checkout}/backup.sh"
+  chmod +x "${checkout}/backup.sh"
   git -C "${checkout}" init -q -b main
   git -C "${checkout}" config user.name 'Synthetic Test'
   git -C "${checkout}" config user.email 'synthetic@example.invalid'
@@ -53,6 +48,7 @@ write_full_config() {
   install -d -m 0700 "$(dirname -- "${config_file}")"
   cat > "${config_file}" <<EOF
 MACHINE_ID="fixture-profile-host"
+BACKUP_COMMAND="${PRIMARY_CHECKOUT}/backup.sh"
 CLAUDE_PROFILES="alpha:${home_dir}/profiles/claude-alpha beta:${home_dir}/profiles/claude-beta"
 CODEX_PROFILES="alpha:${home_dir}/profiles/codex-alpha beta:${home_dir}/profiles/codex-beta"
 OPENCODE_PROFILES="alpha:${home_dir}/.config/opencode-profiles/alpha beta:${home_dir}/.config/opencode-profiles/beta"
@@ -125,6 +121,7 @@ readonly INSTALLER="${PRIMARY_CHECKOUT}/skills/agent-harness-profiles/scripts/in
 readonly DOCTOR="${PRIMARY_CHECKOUT}/skills/agent-harness-profiles/scripts/doctor.sh"
 install -d -m 0700 "${TEMP_ROOT}/snapshots" "${TEMP_ROOT}/output" "${TEMP_ROOT}/cases"
 copy_primary_checkout "${PRIMARY_CHECKOUT}"
+export BACKUP_COMMAND="${PRIMARY_CHECKOUT}/backup.sh"
 
 # A primary main checkout is the durable source for installed repository links.
 success_case="${TEMP_ROOT}/cases/success"
@@ -518,18 +515,14 @@ expect_failure_without_changes untracked-skill-checkout \
   "${untracked_skill_checkout}/skills/agent-harness-profiles/scripts/install.sh" \
   --config "${untracked_skill_config}"
 
-dirty_backup_checkout="${TEMP_ROOT}/dirty-backup-primary"
-copy_primary_checkout "${dirty_backup_checkout}"
-printf '\n# synthetic tracked change\n' >> \
-  "${dirty_backup_checkout}/skills/state-backup/scripts/backup"
-dirty_backup_case="${TEMP_ROOT}/cases/dirty-backup-checkout"
-dirty_backup_home="${dirty_backup_case}/home"
-dirty_backup_config="${dirty_backup_home}/.config/backup/config"
-install -d -m 0700 "$(dirname -- "${dirty_backup_config}")"
-printf 'MACHINE_ID="fixture-profile-host"\n' > "${dirty_backup_config}"
-expect_failure_without_changes dirty-backup-checkout \
-  "${dirty_backup_case}" "${dirty_backup_home}" \
-  "${dirty_backup_checkout}/skills/agent-harness-profiles/scripts/install.sh" \
-  --config "${dirty_backup_config}"
+# With no configured external command, an existing local backup is untouched.
+no_backup_home="${TEMP_ROOT}/cases/no-backup-command/home"
+no_backup_config="${no_backup_home}/.config/backup/config"
+install -d -m 0700 "$(dirname -- "${no_backup_config}")" "${no_backup_home}/bin"
+printf 'MACHINE_ID="fixture-profile-host"\n' > "${no_backup_config}"
+printf 'UNMANAGED_BACKUP_CANARY\n' > "${no_backup_home}/bin/backup"
+env -u BACKUP_COMMAND HOME="${no_backup_home}" "${INSTALLER}" --config "${no_backup_config}" >/dev/null
+[[ "$(cat "${no_backup_home}/bin/backup")" == UNMANAGED_BACKUP_CANARY ]] ||
+  fail 'unconfigured external backup was modified'
 
 printf 'All Agent Harness Profiles tests passed.\n'

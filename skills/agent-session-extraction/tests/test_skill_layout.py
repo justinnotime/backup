@@ -6,8 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-SESSION_SKILL = REPOSITORY_ROOT / "skills" / "agent-session-extraction"
+SESSION_SKILL = Path(__file__).resolve().parents[1]
 
 
 class SkillLayoutTests(unittest.TestCase):
@@ -40,17 +39,6 @@ class SkillLayoutTests(unittest.TestCase):
                         )
                         self.assertEqual(result.returncode, 0, result.stderr)
                         self.assertIn("usage: agent-session-extraction", result.stdout)
-
-    def test_profiles_root_path_is_a_relative_compatibility_link(self) -> None:
-        compatibility_path = REPOSITORY_ROOT / "PROFILES.md"
-        target = "skills/state-backup/references/profiles.md"
-
-        self.assertTrue(compatibility_path.is_symlink())
-        self.assertEqual(os.readlink(compatibility_path), target)
-        self.assertEqual(
-            compatibility_path.resolve(),
-            (REPOSITORY_ROOT / target).resolve(),
-        )
 
 
 if __name__ == "__main__":

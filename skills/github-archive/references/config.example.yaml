@@ -1,0 +1,13 @@
+# Synthetic example. Copy outside the Skill and replace with caller-owned values.
+output_dir: ./archive
+state_file: ./state/github.json
+filename_template: "{number}.md"
+repos:
+  - owner: example-org
+    name: sample-project
+    directory: example-org_sample-project
+    seeds:
+      all: true
+    closure:
+      depth: 0
+      max_total: 300

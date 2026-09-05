@@ -22,6 +22,13 @@ conversationally:
 scripts/backup
 ```
 
-From the repository root, run `tests/run.sh` after any backup behavior or
-compatibility change. Keep machine launchers, credentials, schedules, and
-account-specific policy outside this shared package.
+From this Skill directory, run these checks after any backup behavior or
+compatibility change:
+
+```bash
+bash tests/run.sh
+python3 -B -m unittest discover -s tests -v
+```
+
+The tests and script work without other Skill packages. Keep machine launchers,
+credentials, schedules, and account-specific policy outside this package.

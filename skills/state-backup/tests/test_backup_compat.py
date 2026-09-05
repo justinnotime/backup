@@ -14,7 +14,7 @@ import unittest
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-BACKUP_SCRIPT = REPOSITORY_ROOT / "backup.sh"
+BACKUP_SCRIPT = REPOSITORY_ROOT / "scripts" / "backup"
 
 
 BACKUP_ENVIRONMENT_VARIABLES = {

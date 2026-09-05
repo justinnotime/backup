@@ -26,13 +26,13 @@ class ManifestTest(unittest.TestCase):
         schema = json.loads(
             (
                 REPOSITORY_ROOT
-                / "skills/agent-session-extraction/schemas/manifest-v1.json"
+                / "schemas/manifest-v1.json"
             ).read_text(encoding="utf-8")
         )
         example = json.loads(
             (
                 REPOSITORY_ROOT
-                / "skills/agent-session-extraction/references/manifest.example.json"
+                / "references/manifest.example.json"
             ).read_text(encoding="utf-8")
         )
         jsonschema.Draft202012Validator.check_schema(schema)
@@ -40,7 +40,7 @@ class ManifestTest(unittest.TestCase):
 
         manifest = load_manifest(
             REPOSITORY_ROOT
-            / "skills/agent-session-extraction/references/manifest.example.json",
+            / "references/manifest.example.json",
             environ={"HOME": "/synthetic/home"},
         )
         self.assertEqual(manifest.sources[1].snapshot, "sqlite-immutable")
@@ -78,13 +78,13 @@ class ManifestTest(unittest.TestCase):
         schema = json.loads(
             (
                 REPOSITORY_ROOT
-                / "skills/agent-session-extraction/schemas/manifest-v1.json"
+                / "schemas/manifest-v1.json"
             ).read_text(encoding="utf-8")
         )
         example = json.loads(
             (
                 REPOSITORY_ROOT
-                / "skills/agent-session-extraction/references/manifest.example.json"
+                / "references/manifest.example.json"
             ).read_text(encoding="utf-8")
         )
         validator = jsonschema.Draft202012Validator(schema)

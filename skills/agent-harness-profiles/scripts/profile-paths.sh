@@ -224,45 +224,34 @@ profile_validate_managed_file() {
 }
 
 profile_require_stable_checkout() {
-  local repository_root=$1 repository_resolved top git_dir common_dir branch
-  local backup_implementation backup_relative
+  local skill_root=$1 top git_dir common_dir branch skill_relative
 
   command -v git >/dev/null 2>&1 || fail 'required command is unavailable: git'
   profile_require_path_tools
-  [[ -d "${repository_root}/.git" ]] ||
-    fail 'installation must run from the stable primary Backup checkout'
-  repository_resolved=$(profile_resolved_path "${repository_root}") ||
-    fail 'Backup checkout cannot be resolved'
-  top=$(git -C "${repository_root}" rev-parse --show-toplevel 2>/dev/null) ||
-    fail 'Backup checkout is not a Git worktree'
-  top=$(profile_resolved_path "${top}") || fail 'Backup checkout root cannot be resolved'
-  [[ "${top}" == "${repository_resolved}" ]] || fail 'Backup checkout root is inconsistent'
-  git_dir=$(git -C "${repository_root}" rev-parse --absolute-git-dir 2>/dev/null) ||
-    fail 'Backup Git directory cannot be resolved'
-  common_dir=$(git -C "${repository_root}" rev-parse --git-common-dir 2>/dev/null) ||
-    fail 'Backup common Git directory cannot be resolved'
-  [[ "${common_dir}" == /* ]] || common_dir="${repository_root}/${common_dir}"
-  git_dir=$(profile_resolved_path "${git_dir}") || fail 'Backup Git directory cannot be resolved'
-  common_dir=$(profile_resolved_path "${common_dir}") ||
-    fail 'Backup common Git directory cannot be resolved'
-  [[ "${git_dir}" == "${common_dir}" ]] ||
+  top=$(git -C "${skill_root}" rev-parse --show-toplevel 2>/dev/null) ||
+    fail 'installation requires a stable Git checkout'
+  [[ -d "${top}/.git" ]] || fail 'installation is refused from a linked Git worktree'
+  git_dir=$(git -C "${top}" rev-parse --absolute-git-dir) || fail 'Git directory cannot be resolved'
+  common_dir=$(git -C "${top}" rev-parse --git-common-dir) || fail 'common Git directory cannot be resolved'
+  [[ "${common_dir}" == /* ]] || common_dir="${top}/${common_dir}"
+  [[ "$(profile_resolved_path "${git_dir}")" == "$(profile_resolved_path "${common_dir}")" ]] ||
     fail 'installation is refused from a linked Git worktree'
-  branch=$(git -C "${repository_root}" symbolic-ref --quiet --short HEAD 2>/dev/null) ||
-    fail 'installation requires the main branch of the stable Backup checkout'
-  [[ "${branch}" == main ]] || fail 'installation requires the main branch of the stable Backup checkout'
-  git -C "${repository_root}" rev-parse --verify 'HEAD^{commit}' >/dev/null 2>&1 ||
-    fail 'stable Backup checkout has no committed HEAD'
-  backup_implementation=$(profile_resolved_path "${repository_root}/backup.sh") ||
-    fail 'stable Backup implementation cannot be resolved'
-  profile_path_is_within "${repository_resolved}" "${backup_implementation}" ||
-    fail 'stable Backup entrypoint resolves outside its checkout'
-  backup_relative=${backup_implementation#"${repository_resolved}/"}
-  git -C "${repository_root}" ls-files --error-unmatch -- \
-    backup.sh "${backup_relative}" skills/agent-harness-profiles/SKILL.md >/dev/null 2>&1 ||
-    fail 'stable Backup entrypoints are not tracked by Git'
-  [[ -f "${backup_implementation}" && -x "${backup_implementation}" ]] ||
-    fail 'stable Backup implementation is not an executable file'
-  [[ -z "$(git -C "${repository_root}" status --porcelain --untracked-files=all -- \
-    backup.sh "${backup_relative}" skills/agent-harness-profiles)" ]] ||
-    fail 'stable Backup entrypoints contain uncommitted changes'
+  branch=$(git -C "${top}" symbolic-ref --quiet --short HEAD 2>/dev/null) ||
+    fail 'installation requires the main branch of a stable checkout'
+  [[ "${branch}" == main ]] || fail 'installation requires the main branch of a stable checkout'
+  if [[ "${skill_root}" == "${top}" ]]; then
+    skill_relative=.
+  else
+    skill_relative=${skill_root#"${top}/"}
+  fi
+  git -C "${top}" ls-files --error-unmatch -- "${skill_relative}/SKILL.md" >/dev/null 2>&1 ||
+    fail 'Skill package is not tracked by Git'
+  [[ -z "$(git -C "${top}" status --porcelain --untracked-files=all -- "${skill_relative}")" ]] ||
+    fail 'Skill package contains uncommitted changes'
+}
+
+profile_validate_backup_command() {
+  [[ -n "${BACKUP_COMMAND:-}" ]] || return 0
+  [[ "${BACKUP_COMMAND}" == /* && -f "${BACKUP_COMMAND}" && -x "${BACKUP_COMMAND}" ]] ||
+    fail 'BACKUP_COMMAND must name an absolute executable command'
 }

@@ -3,7 +3,6 @@ set -euo pipefail
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly SKILL_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
-readonly REPO_ROOT="$(cd -- "${SKILL_DIR}/../.." && pwd -P)"
 readonly ORIGINAL_HOME="${HOME}"
 readonly PROFILE_INSTALL_HOME="${ORIGINAL_HOME}"
 config_file="${BACKUP_CONFIG:-${HOME}/.config/backup/config}"
@@ -43,7 +42,7 @@ while (( $# > 0 )); do
   esac
 done
 
-profile_require_stable_checkout "${REPO_ROOT}"
+profile_require_stable_checkout "${SKILL_DIR}"
 [[ -f "${config_file}" ]] || fail "configuration file not found: ${config_file}"
 bash -n "${config_file}" || fail 'configuration syntax is invalid'
 # shellcheck disable=SC1090
@@ -58,7 +57,7 @@ OPENCODE_STATE_DIR="${OPENCODE_STATE_DIR:-${XDG_STATE_HOME:-${PROFILE_INSTALL_HO
 CLAUDE_PROFILES="${CLAUDE_PROFILES:-}"
 
 profile_reset_root_registry
-profile_reserve_path 'Backup checkout' "${REPO_ROOT}"
+profile_reserve_path 'Skill checkout' "$(git -C "${SKILL_DIR}" rev-parse --show-toplevel 2>/dev/null || printf '%s' "${SKILL_DIR}")"
 profile_reserve_fixed_install_roots
 profile_reserve_native_roots claude
 profile_reserve_path 'profile configuration' "${config_file}"
@@ -88,8 +87,11 @@ for entry in ${CLAUDE_PROFILES}; do
   sources+=("${SKILL_DIR}")
 done
 
-targets+=("${PROFILE_INSTALL_HOME}/bin/backup")
-sources+=("${REPO_ROOT}/backup.sh")
+profile_validate_backup_command
+if [[ -n "${BACKUP_COMMAND:-}" ]]; then
+  targets+=("${PROFILE_INSTALL_HOME}/bin/backup")
+  sources+=("${BACKUP_COMMAND}")
+fi
 
 for index in "${!targets[@]}"; do
   target=${targets[$index]}

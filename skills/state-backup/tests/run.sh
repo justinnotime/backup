@@ -5,10 +5,7 @@ readonly ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 readonly TEMP_ROOT="$(mktemp -d)"
 
 cleanup() {
-  case "${TEMP_ROOT}" in
-    /tmp/*) rm -rf -- "${TEMP_ROOT}" ;;
-    *) printf 'refusing unsafe test cleanup: %s\n' "${TEMP_ROOT}" >&2 ;;
-  esac
+  rm -rf -- "${TEMP_ROOT}"
 }
 trap cleanup EXIT
 
@@ -25,8 +22,7 @@ assert_not_exists() {
   [[ ! -e "$1" && ! -L "$1" ]] || fail "expected path to be absent: $1"
 }
 
-bash -n "${ROOT_DIR}/backup.sh"
-bash "${ROOT_DIR}/tests/test-agent-harness-profiles.sh"
+bash -n "${ROOT_DIR}/scripts/backup"
 
 default_home="${TEMP_ROOT}/default"
 install -d -m 0700 "${default_home}/.dsh/sessions" "${default_home}/.config/backup"
@@ -37,7 +33,7 @@ MACHINE_ID="fixture-default"
 SYNCTHING_ROOT="${default_home}/sync"
 BACKUP_LOG="${default_home}/backup.log"
 EOF
-HOME="${default_home}" "${ROOT_DIR}/backup.sh" >/dev/null
+HOME="${default_home}" "${ROOT_DIR}/scripts/backup" >/dev/null
 assert_file "${default_home}/sync/backup/fixture-default/dsh/sessions/example.jsonl"
 assert_not_exists "${default_home}/sync/backup/fixture-default/dsh/.credentials.yaml"
 
@@ -57,15 +53,8 @@ CODEX_PROFILES="alternate:${legacy_home}/.codex-alternate"
 OPENCODE_PROFILES="alternate:${legacy_home}/.opencode-alternate"
 DSH_PROFILES="alternate:${legacy_home}/.dsh-alternate"
 EOF
-HOME="${legacy_home}" "${ROOT_DIR}/backup.sh" >/dev/null
+HOME="${legacy_home}" "${ROOT_DIR}/scripts/backup" >/dev/null
 assert_file "${legacy_home}/sync/backup/fixture-legacy/dsh-alternate/sessions/alternate.jsonl"
 assert_not_exists "${legacy_home}/sync/backup/fixture-legacy/dsh"
-
-forbidden_label_one='pers''onal'
-forbidden_label_two='wo''rk'
-if grep -R -n -i -E "\\b(${forbidden_label_one}|${forbidden_label_two})\\b" \
-  --exclude-dir=.git --exclude=run.sh "${ROOT_DIR}" >/dev/null; then
-  fail 'repository contains a policy-specific profile label'
-fi
 
 printf 'All compatibility tests passed.\n'

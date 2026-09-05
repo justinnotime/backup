@@ -3,7 +3,7 @@
 This repository retains its `backup` name and stable backup entrypoints while
 growing into a collection of deterministic agent-harness Skills. It contains a
 state backup, Syncthing diagnostics, a remote clipboard helper, and a shared
-session-extraction runtime. It also provides generic setup helpers for named
+session-extraction runtime, and a configurable GitHub archive. It also provides generic setup helpers for named
 harness roots; callers retain all label meaning in their own configuration.
 
 The repository works in both shapes:
@@ -28,8 +28,9 @@ trust semantics to them.
 | `clip.sh` | Stable compatibility link for the clipboard shell helper |
 | `skills/agent-harness-profiles/` | Configuration-driven launcher and Skill-link setup |
 | `skills/agent-session-extraction/` | Manifest-driven extraction Skill and command wrappers |
-| `src/agent_skills/sessions/` | Shared normalized-session runtime |
-| `tests/run.sh` | Default-only and legacy multi-root compatibility checks |
+| `skills/github-archive/` | Caller-configured GitHub issue, pull-request, and comment archive |
+| `skills/agent-session-extraction/src/agent_skills/sessions/` | Package-owned normalized-session runtime |
+| `skills/<name>/tests/` | Tests owned and runnable by that Skill |
 
 The three root shell paths are relative symbolic links into their Skill
 packages. This keeps existing scheduler and shell configuration working while
@@ -143,14 +144,47 @@ validation rejects unsafe DSH sources, destinations, labels, and links.
 Before deploying an update:
 
 ```bash
-tests/run.sh
+bash skills/state-backup/tests/run.sh
+python3 -B -m unittest discover -s skills/state-backup/tests -v
 ```
 
 Then run the existing backup command manually and inspect its log.
 
-Session-extraction development additionally uses the Python tests declared in
-`pyproject.toml`. Validate every new or changed Skill with the repository's
-Skill validator before publishing it.
+Each Skill contains its own source, tests, and dependency declarations and can
+be copied without sibling packages. There is no repository-wide Python project
+or shared source directory. Run additional checks from the affected package:
+
+```bash
+(cd skills/agent-harness-profiles && bash tests/run.sh)
+(cd skills/agent-session-extraction && uv sync --locked --extra test && uv run --no-sync pytest tests)
+(cd skills/github-archive && uv run --locked pytest tests)
+```
+
+Consumers of the session Python API configure the runtime root as
+`/absolute/path/to/skills/agent-session-extraction`; its import directory is
+`<runtime-root>/src`. The package's command wrappers resolve this themselves.
+The profiles installer accepts an optional `BACKUP_COMMAND` in local
+configuration instead of discovering another Skill's source files.
+
+Validate every new or changed Skill with the Skill Creator validator before
+publishing it. Dependency installation and validation artifacts belong in the
+individual package or a disposable workspace, never a root shared environment.
+
+## GitHub archive
+
+The `github-archive` Skill contains its own Python package, dependencies, and
+tests. Select repositories and archive paths in a private YAML file outside
+this repository, following [its configuration reference](skills/github-archive/references/config.md).
+Authenticate `gh` separately, then run:
+
+```bash
+uv sync --project skills/github-archive --locked
+skills/github-archive/scripts/sync --config /path/to/private/config.yaml --dry-run
+skills/github-archive/scripts/sync --config /path/to/private/config.yaml
+```
+
+The command uses read-only GitHub requests. Callers own configuration, archive,
+state, scheduling, and publication. No other Skill is required.
 
 ## Clipboard helper
 
