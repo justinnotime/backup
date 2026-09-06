@@ -376,8 +376,12 @@ def scan_inventory(manifest: Manifest) -> OutputInventory:
         ] = entry
 
     directory = manifest.output.prompt_directory
-    target = _safe_output_directory(manifest.output.repository_root, directory)
-    if target.exists():
+    target = (
+        _safe_output_directory(manifest.output.repository_root, directory)
+        if directory is not None
+        else None
+    )
+    if target is not None and target.exists():
         if any(path.is_symlink() for path in target.rglob("*")):
             raise AuditError("output inventory contains a symbolic link")
         for path in sorted(target.rglob("*.md")):

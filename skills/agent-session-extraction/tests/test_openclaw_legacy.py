@@ -331,3 +331,74 @@ def test_added_configuration_matches_json_schema(setup):
         (Path(__file__).parents[1] / "schemas/manifest-v1.json").read_text()
     )
     jsonschema.Draft202012Validator(schema).validate(data)
+
+
+@pytest.mark.parametrize("omitted", [False, True])
+@pytest.mark.parametrize("indexes", ["none", "owner"])
+def test_history_only_uses_only_its_owned_directory(setup, omitted, indexes):
+    import jsonschema
+
+    from agent_skills.sessions.api import doctor
+
+    source, output, path, data, config_path = setup
+    if omitted:
+        del data["output"]["prompt_directory"]
+    else:
+        data["output"]["prompt_directory"] = None
+    data["publisher"]["owned_subtrees"] = ["History"]
+    data["indexes"]["mode"] = indexes
+    # History-only is independent of any per-harness prompt selection policy.
+    del data["project_policy"]["prompt_by_harness"]
+    (source / "session.jsonl").write_text(records(extra=True))
+    schema = json.loads(
+        (Path(__file__).parents[1] / "schemas/manifest-v1.json").read_text()
+    )
+    jsonschema.Draft202012Validator(schema).validate(data)
+    config = write_manifest(config_path, data)
+    manifest = load_manifest(config, environ={})
+    assert manifest.output.prompt_directory is None
+    assert manifest.publisher.owned_subtrees == ("History",)
+    assert doctor(config)["status"] == "ok"
+    before = path.read_bytes()
+    run(config, dry_run=True)
+    assert path.read_bytes() == before
+    run(config)
+    assert "A later synthetic request" in path.read_text()
+    expected = {path}
+    if indexes == "owner":
+        expected.add(output / "History/README.md")
+    assert set(output.rglob("*.md")) == expected
+    assert {item.name for item in output.iterdir()} == {"History"}
+    assert run(config).write_count == 0
+
+
+def test_disabling_prompt_view_preserves_prior_prompt_files_without_scanning_them(
+    setup,
+):
+    source, output, _path, data, config_path = setup
+    del data["project_policy"]["prompt_by_harness"]
+    (source / "session.jsonl").write_text(records(extra=True))
+    run(write_manifest(config_path, data))
+    prompts = list((output / "Prompts").rglob("*.md"))
+    assert len(prompts) == 1
+    # Existing files outside the selected history cannot block its audit or be
+    # deleted when that writer stops owning the prompt view.
+    unrelated = output / "Prompts/unrecognized.md"
+    unrelated.write_text("Caller-owned content, not a managed session\n")
+    before = {path: path.read_bytes() for path in [*prompts, unrelated]}
+    data["output"]["prompt_directory"] = None
+    data["publisher"]["owned_subtrees"] = ["History"]
+    data["cleanup"]["scope"] = "owner"
+    data["sources"][0]["allow_empty"] = True
+    (source / "session.jsonl").unlink()
+    report = run(write_manifest(config_path, data))
+    assert report.removal_count == 1
+    assert {path: path.read_bytes() for path in before} == before
+
+
+@pytest.mark.parametrize("directory", ["History", "History/Prompts"])
+def test_enabled_prompt_view_still_requires_disjoint_directories(setup, directory):
+    _source, _output, _path, data, config_path = setup
+    data["output"]["prompt_directory"] = directory
+    with pytest.raises(ManifestError, match="must be disjoint"):
+        load_manifest(write_manifest(config_path, data), environ={})

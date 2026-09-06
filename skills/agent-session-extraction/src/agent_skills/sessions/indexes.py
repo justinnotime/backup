@@ -73,7 +73,8 @@ def add_indexes(
         ("history", directory, "history")
         for directory in manifest.output.history_directories()
     ]
-    views.append(("prompts", manifest.output.prompt_directory, "prompts"))
+    if manifest.output.prompt_directory is not None:
+        views.append(("prompts", manifest.output.prompt_directory, "prompts"))
     for kind, directory, entry_kind in views:
         entries = [
             entry

@@ -249,7 +249,7 @@
     },
     "output": {
       "type": "object", "additionalProperties": false,
-      "required": ["repository_root", "history_directory", "prompt_directory", "layout", "prompt_max_chars", "prompt_code_block_max_chars", "encryption_attributes", "compatibility"],
+      "required": ["repository_root", "history_directory", "layout", "prompt_max_chars", "prompt_code_block_max_chars", "encryption_attributes", "compatibility"],
       "properties": {
         "repository_root": {"$ref": "#/$defs/absolutePath"},
         "history_directory": {"$ref": "#/$defs/relativePath"},
@@ -258,7 +258,7 @@
           "propertyNames": {"enum": ["claude-code", "codex", "opencode", "dsh", "cursor", "openclaw"]},
           "additionalProperties": {"$ref": "#/$defs/relativePath"}
         },
-        "prompt_directory": {"$ref": "#/$defs/relativePath"},
+        "prompt_directory": {"anyOf": [{"$ref": "#/$defs/relativePath"}, {"type": "null"}]},
         "layout": {"enum": ["flat", "monthly"]},
         "filename_strategy": {"$ref": "#/$defs/filenameStrategy"},
         "filename_strategy_by_harness": {

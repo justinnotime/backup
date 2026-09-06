@@ -424,19 +424,22 @@ def build_publication_plan(
         session.identity: manifest.output.history_directory_for(session.harness)
         for session in snapshot.sessions
     }
-    prompt_destinations = {
-        session.identity: manifest.output.prompt_directory
-        for session in snapshot.sessions
-    }
     history_allocated = allocate_filenames(
         snapshot.sessions,
         strategies=strategies,
         destinations=history_destinations,
     )
-    prompt_allocated = allocate_filenames(
-        snapshot.sessions,
-        strategies=strategies,
-        destinations=prompt_destinations,
+    prompt_allocated = (
+        allocate_filenames(
+            snapshot.sessions,
+            strategies=strategies,
+            destinations={
+                session.identity: manifest.output.prompt_directory
+                for session in snapshot.sessions
+            },
+        )
+        if manifest.output.prompt_directory is not None
+        else {}
     )
     existing = _existing_paths(manifest, inventory)
     duplicate_existing: dict[tuple[tuple[str, str, str], str], list] = {}
@@ -477,22 +480,26 @@ def build_publication_plan(
         )
     }
     for session in snapshot.sessions:
-        for entry_kind, planned_kind, directory, filename, renderer in (
+        views = [
             (
                 "history",
                 "history",
                 manifest.output.history_directory_for(session.harness),
                 history_allocated[session.identity],
                 render_history,
-            ),
-            (
-                "prompts",
-                "prompt",
-                manifest.output.prompt_directory,
-                prompt_allocated[session.identity],
-                render_prompts,
-            ),
-        ):
+            )
+        ]
+        if manifest.output.prompt_directory is not None:
+            views.append(
+                (
+                    "prompts",
+                    "prompt",
+                    manifest.output.prompt_directory,
+                    prompt_allocated[session.identity],
+                    render_prompts,
+                )
+            )
+        for entry_kind, planned_kind, directory, filename, renderer in views:
             prior = existing.get((session.identity, entry_kind))
             if prior is not None and prior.relative_path in frozen_legacy_paths:
                 continue

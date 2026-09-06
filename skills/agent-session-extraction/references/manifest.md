@@ -212,6 +212,13 @@ location.
 
 ## Adopting legacy OpenClaw output
 
+Omit `output.prompt_directory`, or set it to `null`, when only session history
+is owned by this writer. No prompt view is rendered, scanned, cleaned up or
+indexed, and `publisher.owned_subtrees` needs only the selected history paths.
+Existing prompt files outside those paths remain untouched. Index modes still
+apply to the selected history directories. A configured prompt directory keeps
+the normal prompt behavior and must remain disjoint from every history directory.
+
 An owning consumer can adopt old `# Claw Session` Markdown without copying an
 extractor. Choose a legacy Markdown compatibility rule and explicitly set
 `output.compatibility.legacy_openclaw_node` to the owning opaque node. Also

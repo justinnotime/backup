@@ -254,7 +254,7 @@ class OutputSpec:
     repository_root: Path
     history_directory: str
     history_directory_by_harness: Mapping[str, str]
-    prompt_directory: str
+    prompt_directory: str | None
     layout: str
     filename_strategy: str
     filename_strategy_by_harness: Mapping[str, str]
@@ -770,6 +770,7 @@ def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
             "filename_strategy_by_harness",
             "day_split",
             "metadata_headers",
+            "prompt_directory",
         },
         "output",
     )
@@ -921,7 +922,9 @@ def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
         _absolute(output["repository_root"], "output.repository_root"),
         _relative(output["history_directory"], "output.history_directory"),
         history_directory_by_harness,
-        _relative(output["prompt_directory"], "output.prompt_directory"),
+        _relative(output["prompt_directory"], "output.prompt_directory")
+        if output.get("prompt_directory") is not None
+        else None,
         _enum(output["layout"], {"flat", "monthly"}, "output.layout"),
         filename_strategy,
         filename_strategy_by_harness,
@@ -936,10 +939,9 @@ def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
         static_patterns,
         metadata_headers,
     )
-    output_directories = (
-        *output_spec.history_directories(),
-        output_spec.prompt_directory,
-    )
+    output_directories = output_spec.history_directories()
+    if output_spec.prompt_directory is not None:
+        output_directories += (output_spec.prompt_directory,)
     if any(
         not any(path.startswith(directory + "/") for directory in output_directories)
         for path in (*static_paths, *static_patterns)
@@ -1069,12 +1071,12 @@ def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
         raise ManifestError("git-crypt encryption requires git-worktree publication")
     if publisher_spec.encryption == "none" and key_source is not None:
         raise ManifestError("an unencrypted publisher must not configure a key link")
-    for directory in (*output_spec.history_directories(), output_spec.prompt_directory):
+    for directory in output_directories:
         if not any(
             directory == item or directory.startswith(item + "/") for item in owned
         ):
             raise ManifestError(
-                "publisher owned_subtrees must contain both output directories"
+                "publisher owned_subtrees must contain every configured output directory"
             )
 
     gates = _mapping(cfg["gates"], "gates")
