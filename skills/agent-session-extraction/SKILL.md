@@ -8,6 +8,12 @@ description: Extract, audit, reconcile, and stage agent-harness sessions through
 Use the scripts in this package as the behavior authority. A scheduler calls
 the scripts directly; it does not invoke this Skill conversationally.
 
+Read an optional consumer profile from `AGENT_SESSION_EXTRACTION_PROFILE` or
+`${XDG_CONFIG_HOME:-$HOME/.config}/agent-session-extraction/profile.md` when
+present. It can locate private manifests, publication policy, and deployment
+commands. It does not replace the manifest or grant access to unconfigured
+sources; current user instructions take precedence.
+
 This directory is the complete runtime root: `src/agent_skills`, `tests/`,
 `pyproject.toml`, and `uv.lock` belong to this package. It can be copied and
 installed independently. A consumer importing the Python API adds this

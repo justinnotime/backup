@@ -14,6 +14,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - skill: structure-lint
+            kind: instruction
+            python: "3.14"
+            check: Skill format
           - skill: chat-mentions
             kind: python
             python: "3.10"
