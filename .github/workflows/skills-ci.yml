@@ -348,7 +348,11 @@ jobs:
         run: |
           uv run --no-sync ruff check src tests
           if [[ "${{ matrix.python }}" != "3.10" ]]; then
-            uv run --no-sync skills-ref validate "$PWD"
+            if [[ "$SKILL" == "runtime-layout" ]]; then
+              uv run --no-sync skills-ref validate "$PWD"
+            else
+              uv run --no-sync agentskills validate "$PWD"
+            fi
           fi
       - name: Lint Google Docs authority
         if: matrix.skill == 'google-docs-authority'
