@@ -60,6 +60,8 @@ reusing that name removes the redirect.
 | `skills/draft-human-reply/` | Natural reply drafting with optional private writing preferences |
 | `skills/pr-status-table/` | Current pull request reporting with an optional private format |
 | `skills/realign/` | Evidence-based comparison of recent work with the user's objective |
+| `skills/secret-lint/` | Credential exposure audit procedure with redacted reporting |
+| `skills/privacy-lint/` | Publication privacy review with optional private identifier patterns |
 | `skills/agent-session-extraction/src/agent_skills/sessions/` | Package-owned normalized-session runtime |
 | `skills/<name>/tests/` | Tests owned and runnable by that Skill |
 
@@ -197,6 +199,8 @@ or shared source directory. Run additional checks from the affected package:
 (cd skills/draft-human-reply && uv run --locked skills-ref validate "$PWD") # format check, no runtime code
 (cd skills/pr-status-table && uv run --locked skills-ref validate "$PWD")
 (cd skills/realign && uv run --locked skills-ref validate "$PWD")
+(cd skills/secret-lint && uv run --locked skills-ref validate "$PWD")
+(cd skills/privacy-lint && uv run --locked skills-ref validate "$PWD")
 (cd skills/slack-archive && uv run --locked pytest tests)
 (cd skills/whatsapp-archive && uv run --locked pytest tests && npm ci --prefix bridge && npm test --prefix bridge)
 ```
