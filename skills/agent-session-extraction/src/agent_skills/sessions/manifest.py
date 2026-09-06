@@ -6,7 +6,8 @@ import json
 import os
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -89,6 +90,7 @@ _HARNESS_DECODER_KEYS = {
         "include_channel_metadata",
         "include_session_metadata",
         "session_metadata_fields",
+        "sessions_metadata_path",
         "channel",
     },
 }
@@ -266,6 +268,10 @@ class OutputSpec:
     #   seen after the switch get one file per UTC day. all: slice every
     #   session, including ones with existing output (evaluation/migration).
     day_split: str = "off"
+    legacy_openclaw_node: str | None = None
+    static_paths: tuple[str, ...] = ()
+    static_patterns: tuple[str, ...] = ()
+    metadata_headers: Mapping[str, str] = field(default_factory=dict)
 
     def history_directory_for(self, harness: str) -> str:
         return self.history_directory_by_harness.get(harness, self.history_directory)
@@ -278,6 +284,18 @@ class OutputSpec:
                     *self.history_directory_by_harness.values(),
                 }
             )
+        )
+
+    def preserve_static(self, path: str) -> bool:
+        return path in self.static_paths or any(
+            len(PurePosixPath(path).parts) == len(PurePosixPath(pattern).parts)
+            and all(
+                fnmatchcase(part, glob)
+                for part, glob in zip(
+                    PurePosixPath(path).parts, PurePosixPath(pattern).parts, strict=True
+                )
+            )
+            for pattern in self.static_patterns
         )
 
     def filename_strategy_for(self, harness: str) -> str:
@@ -445,6 +463,10 @@ def _decoder_options(harness: str, value: Any) -> Mapping[str, Any]:
         not isinstance(cfg["channel"], str) or not cfg["channel"].strip()
     ):
         raise ManifestError("source.decoder.channel must be a non-empty string")
+    if "sessions_metadata_path" in cfg:
+        _absolute(
+            cfg["sessions_metadata_path"], "source.decoder.sessions_metadata_path"
+        )
     return cfg
 
 
@@ -486,16 +508,13 @@ def _source(value: Any, environ: Mapping[str, str]) -> SourceSpec:
         "source.discovery.superseded_sha256",
     )
     if any(
-        re.fullmatch(r"[0-9a-f]{64}", digest) is None
-        for digest in superseded_sha256
+        re.fullmatch(r"[0-9a-f]{64}", digest) is None for digest in superseded_sha256
     ):
         raise ManifestError(
             "source.discovery.superseded_sha256 must contain lowercase SHA-256 values"
         )
     if len(set(superseded_sha256)) != len(superseded_sha256):
-        raise ManifestError(
-            "source.discovery.superseded_sha256 values must be unique"
-        )
+        raise ManifestError("source.discovery.superseded_sha256 values must be unique")
     decoder = _decoder_options(harness, cfg["decoder"])
     snapshot = _enum(
         cfg["snapshot"],
@@ -738,6 +757,7 @@ def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
         "prompt_max_chars",
         "prompt_code_block_max_chars",
         "encryption_attributes",
+        "metadata_headers",
         "compatibility",
         "day_split",
     }
@@ -749,6 +769,7 @@ def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
             "filename_strategy",
             "filename_strategy_by_harness",
             "day_split",
+            "metadata_headers",
         },
         "output",
     )
@@ -771,6 +792,7 @@ def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
         "session-last-component-prefix-8",
         "session-suffix-8",
         "node-session-sha256-12",
+        "session-date-prefix-8",
     }
     filename_strategy = _enum(
         output.get("filename_strategy", "project-session-suffix"),
@@ -807,11 +829,35 @@ def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
     reserved_headers = _RESERVED_OUTPUT_HEADERS.intersection(encryption_attributes)
     if reserved_headers:
         raise ManifestError("output encryption attributes use reserved header names")
+    metadata_headers = _mapping(
+        output.get("metadata_headers", {}), "output.metadata_headers"
+    )
+    if any(
+        not re.fullmatch(r"[A-Za-z][A-Za-z0-9-]{0,63}", key)
+        or not isinstance(value, str)
+        or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", value)
+        for key, value in metadata_headers.items()
+    ) or (_RESERVED_OUTPUT_HEADERS | encryption_attributes.keys()).intersection(
+        metadata_headers
+    ):
+        raise ManifestError(
+            "metadata headers must select fields with distinct non-reserved names"
+        )
     compatibility = _mapping(output["compatibility"], "output.compatibility")
     _required(
         compatibility, {"rule_version", "unchanged_sha256"}, "output.compatibility"
     )
-    _only(compatibility, {"rule_version", "unchanged_sha256"}, "output.compatibility")
+    _only(
+        compatibility,
+        {
+            "rule_version",
+            "unchanged_sha256",
+            "legacy_openclaw_node",
+            "static_paths",
+            "static_patterns",
+        },
+        "output.compatibility",
+    )
     compatibility_rule = _enum(
         compatibility["rule_version"],
         {"none", "legacy-output/v1", *LEGACY_AGENT_MARKDOWN_RULES},
@@ -824,6 +870,40 @@ def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
         raise ManifestError("compatibility hashes must be lowercase SHA-256 values")
     if compatibility_rule == "none" and compatibility_hashes:
         raise ManifestError("compatibility hashes require legacy-output/v1")
+    legacy_openclaw_node = compatibility.get("legacy_openclaw_node")
+    if legacy_openclaw_node is not None and (
+        not isinstance(legacy_openclaw_node, str)
+        or _LABEL.fullmatch(legacy_openclaw_node) is None
+    ):
+        raise ManifestError("legacy OpenClaw ownership requires an explicit node label")
+    static_paths = tuple(
+        _relative(value, "output.compatibility.static_paths")
+        for value in _string_list(
+            compatibility.get("static_paths", []), "output.compatibility.static_paths"
+        )
+    )
+    if len(set(static_paths)) != len(static_paths) or any(
+        not value.endswith(".md") or any(character in value for character in "*?[]")
+        for value in static_paths
+    ):
+        raise ManifestError("static paths must be distinct literal Markdown paths")
+    static_patterns = tuple(
+        _relative(value, "output.compatibility.static_patterns")
+        for value in _string_list(
+            compatibility.get("static_patterns", []),
+            "output.compatibility.static_patterns",
+        )
+    )
+    if len(set(static_patterns)) != len(static_patterns) or any(
+        not value.endswith(".md") or "**" in value for value in static_patterns
+    ):
+        raise ManifestError(
+            "static patterns must be distinct non-recursive Markdown paths"
+        )
+    if (
+        legacy_openclaw_node is not None or static_paths or static_patterns
+    ) and compatibility_rule not in LEGACY_AGENT_MARKDOWN_RULES:
+        raise ManifestError("legacy adoption options require a legacy Markdown rule")
     prompt_max = _nonnegative_int(
         output["prompt_max_chars"], "prompt_max_chars", minimum=64
     )
@@ -851,11 +931,27 @@ def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
         compatibility_rule,
         compatibility_hashes,
         day_split,
+        legacy_openclaw_node,
+        static_paths,
+        static_patterns,
+        metadata_headers,
     )
     output_directories = (
         *output_spec.history_directories(),
         output_spec.prompt_directory,
     )
+    if any(
+        not any(path.startswith(directory + "/") for directory in output_directories)
+        for path in (*static_paths, *static_patterns)
+    ):
+        raise ManifestError("static paths must be inside configured output directories")
+    if (
+        legacy_openclaw_node is not None
+        and "openclaw" not in history_directory_by_harness
+    ):
+        raise ManifestError(
+            "legacy OpenClaw adoption requires an explicit history route"
+        )
     for index, left in enumerate(output_directories):
         for right in output_directories[index + 1 :]:
             if (

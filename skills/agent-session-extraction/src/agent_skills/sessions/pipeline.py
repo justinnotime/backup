@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import json
 from collections import Counter
 from dataclasses import replace
 from pathlib import Path
@@ -43,12 +44,13 @@ from .publish import (
 )
 from .reconcile import decoder_canary_self_test, reconcile_snapshot
 from .redact import Redactor
-from .render import render_history, render_prompts
+from .render import metadata_headers, render_history, render_prompts
 from .slicing import slice_sessions_by_day
 from .sources import (
     SourceAccessError,
     discover_candidates,
     revalidate_snapshot,
+    session_metadata_source,
     snapshot_candidate,
     validate_configured_path,
 )
@@ -95,6 +97,13 @@ def _decode_snapshot(
         raise SourceAccessError("snapshot identity does not match its source")
     if snapshot.access_mode != "bytes" and validated_root is None:
         raise SourceAccessError("direct source snapshots require revalidation")
+    if (
+        "sessions_metadata_path" in source.decoder
+        and "sessions_metadata" not in snapshot.decoder_options
+    ):
+        raise SourceAccessError(
+            "configured session metadata requires a caller-frozen snapshot"
+        )
     decoder = decoder_for(source.harness)
     decoder_options = dict(snapshot.decoder_options)
     decoder_options["synthetic_prompt_prefixes"] = (
@@ -201,6 +210,44 @@ def _is_superseded_snapshot(source: SourceSpec, snapshot) -> bool:
     )
 
 
+def _session_metadata(source: SourceSpec) -> dict[str, dict]:
+    """Read an explicitly declared OpenClaw sidecar under the source path policy."""
+    metadata_source = session_metadata_source(source)
+    if metadata_source is None:
+        return {}
+    root = validate_configured_path(metadata_source)
+    snapshot = snapshot_candidate(metadata_source, root, root.lexical)
+    payload = json.loads(snapshot.payload)
+    rows = (
+        payload
+        if isinstance(payload, list)
+        else payload.get("sessions")
+        if isinstance(payload, dict)
+        else None
+    )
+    if not isinstance(rows, list):
+        raise SourceAccessError("session metadata must contain a sessions list")
+    selected = {}
+    for row in rows:
+        if (
+            not isinstance(row, dict)
+            or not isinstance(row.get("id"), str)
+            or not row["id"]
+        ):
+            raise SourceAccessError("session metadata requires string identities")
+        if row["id"] in selected:
+            raise SourceAccessError("session metadata contains duplicate identities")
+        fields = {}
+        for field in ("label", "channel"):
+            value = row.get(field)
+            if value is not None and not isinstance(value, str):
+                raise SourceAccessError("session metadata fields must be strings")
+            if value:
+                fields[field] = value
+        selected[row["id"]] = fields
+    return selected
+
+
 def _extract_source(manifest: Manifest, source: SourceSpec):
     source_sessions = []
     observations = []
@@ -211,13 +258,20 @@ def _extract_source(manifest: Manifest, source: SourceSpec):
         if not candidates and not source.allow_empty:
             raise SourceAccessError("source contains no candidates")
         selected_candidates = 0
+        metadata = _session_metadata(source)
         for candidate in candidates:
             snapshot = snapshot_candidate(source, root, candidate)
+            if "sessions_metadata_path" in source.decoder:
+                snapshot = replace(
+                    snapshot,
+                    decoder_options={
+                        **snapshot.decoder_options,
+                        "sessions_metadata": metadata,
+                    },
+                )
             if _is_superseded_snapshot(source, snapshot):
                 diagnostics.append(
-                    Diagnostic(
-                        "SOURCE_CANDIDATE_SUPERSEDED", source.source_id, count=1
-                    )
+                    Diagnostic("SOURCE_CANDIDATE_SUPERSEDED", source.source_id, count=1)
                 )
                 continue
             selected_candidates += 1
@@ -359,8 +413,7 @@ def build_publication_plan(
             for entry in inventory.entries
             if entry.grandfathered and entry.kind == "prompts"
         }
-        if manifest.output.compatibility_rule
-        == FROZEN_LEGACY_AGENT_MARKDOWN_RULE
+        if manifest.output.compatibility_rule == FROZEN_LEGACY_AGENT_MARKDOWN_RULE
         else set()
     )
     strategies = {
@@ -389,7 +442,9 @@ def build_publication_plan(
     duplicate_existing: dict[tuple[tuple[str, str, str], str], list] = {}
     for entry in inventory.entries:
         if entry.identity is not None and entry.kind in {"history", "prompts"}:
-            duplicate_existing.setdefault((entry.identity, entry.kind), []).append(entry)
+            duplicate_existing.setdefault((entry.identity, entry.kind), []).append(
+                entry
+            )
     legacy_prompt_candidates: dict[tuple[str, str, str], list] = {}
     for entry in inventory.entries:
         if (
@@ -496,9 +551,7 @@ def build_publication_plan(
             if prior is not None:
                 desired = prior.relative_path
             conflicting = occupied.get(desired)
-            prior_owns_desired = (
-                prior is not None and prior.relative_path == desired
-            )
+            prior_owns_desired = prior is not None and prior.relative_path == desired
             if (
                 desired in occupied
                 and desired not in freed
@@ -534,6 +587,10 @@ def build_publication_plan(
                 and desired == prior.relative_path
                 and prior.semantic_digest is not None
                 and prior.semantic_digest == desired_semantic
+                and all(
+                    prior.headers.get(key) == redactor.apply(value)[0]
+                    for key, value in metadata_headers(session, manifest.output).items()
+                )
             ):
                 continue
             old = inventory_by_path.get(desired)

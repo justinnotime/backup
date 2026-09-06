@@ -12,7 +12,7 @@ from pathlib import Path, PurePosixPath
 from .manifest import LEGACY_AGENT_MARKDOWN_RULES, Manifest
 from .model import PublicationPlan, Session
 from .redact import Redactor
-from .render import MANAGED_BY
+from .render import MANAGED_BY, metadata_headers
 
 GIT_CRYPT_MAGIC = b"\x00GITCRYPT\x00"
 
@@ -78,6 +78,43 @@ _HISTORY_HEADING = re.compile(
 _PROMPT_HEADING = re.compile(
     r"(?m)^### (?:~?\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}Z|unknown)\s*$"
 )
+_OPENCLAW_HEADING = re.compile(
+    r"(?m)^## (\U0001f464 User|\U0001f916 Assistant)(?: \(\d{2}:\d{2}\))?\s*$"
+)
+
+
+def _legacy_openclaw(text: str, node: str) -> tuple[dict[str, str], str]:
+    """Read the old format only with caller-supplied ownership, never a hostname."""
+    header, separator, _body = text.partition("\n---\n")
+    if not separator or not header.startswith("# Claw Session "):
+        raise AuditError("unrecognized legacy OpenClaw history")
+    fields: dict[str, str] = {}
+    for line in header.splitlines():
+        match = re.fullmatch(r"- \*\*([^*]+):\*\*\s*(.*)", line)
+        if match:
+            if match.group(1) in fields:
+                raise AuditError("duplicate legacy OpenClaw metadata")
+            fields[match.group(1)] = _legacy_value(match.group(2))
+    session_id = fields.get("Session ID", "")
+    if not session_id or any(character in session_id for character in "\r\n\0"):
+        raise AuditError("legacy OpenClaw output is missing its session identity")
+    if "Host" in fields and fields["Host"] != node:
+        raise AuditError("legacy OpenClaw ownership contradicts the configured node")
+    fields.update({"Tool": "openclaw", "Host": node, "Session": session_id})
+    return fields, session_id
+
+
+def _legacy_openclaw_digest(text: str) -> str | None:
+    matches = list(_OPENCLAW_HEADING.finditer(text))
+    events = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        body = text[match.end() : end].strip()
+        if body:
+            events.append(
+                ("user" if match.group(1).endswith("User") else "assistant", body)
+            )
+    return _semantic_digest(events) if events else None
 
 
 def _legacy_semantic_digest(text: str, kind: str) -> str | None:
@@ -96,10 +133,11 @@ def _legacy_semantic_digest(text: str, kind: str) -> str | None:
             role = match.group(1)
         if role in {"user", "peer-agent"}:
             lines = body.splitlines()
-            if lines and all(not line or line == ">" or line.startswith("> ") for line in lines):
+            if lines and all(
+                not line or line == ">" or line.startswith("> ") for line in lines
+            ):
                 body = "\n".join(
-                    "" if line == ">" else line.removeprefix("> ")
-                    for line in lines
+                    "" if line == ">" else line.removeprefix("> ") for line in lines
                 ).strip()
         if body:
             events.append((role, body))
@@ -142,6 +180,8 @@ def entry_from_content(
     legacy_kind: str | None = None,
     legacy_harness: str | None = None,
     legacy_identity: tuple[str, str, str] | None = None,
+    legacy_openclaw_node: str | None = None,
+    preserve_static: bool = False,
 ) -> InventoryEntry:
     digest = hashlib.sha256(content).hexdigest()
     if content.startswith(GIT_CRYPT_MAGIC):
@@ -153,6 +193,18 @@ def entry_from_content(
             return InventoryEntry(relative_path, digest, None, None, {}, "", True)
         raise AuditError("output is not UTF-8 and is not grandfathered") from exc
     headers, title = _headers(text)
+    if preserve_static:
+        if (
+            headers.get("Managed-By") == MANAGED_BY
+            or _HISTORY_HEADING.search(text)
+            or _OPENCLAW_HEADING.search(text)
+            or re.search(r"(?m)^- (?:\*\*)?Session(?: ID)?:", text)
+            or text.startswith("# Claw Session ")
+        ):
+            raise AuditError("configured static output contains session records")
+        return InventoryEntry(
+            relative_path, digest, None, "static", headers, title, True
+        )
     if headers.get("Managed-By") != MANAGED_BY:
         if compatibility_rule in LEGACY_AGENT_MARKDOWN_RULES and legacy_kind:
             if PurePosixPath(relative_path).name in {"README.md", "PROVENANCE.md"}:
@@ -162,6 +214,36 @@ def entry_from_content(
             canonical = dict(headers)
             identity = legacy_identity
             harness = legacy_harness
+            if (
+                legacy_kind == "history"
+                and harness == "openclaw"
+                and text.startswith("# Claw Session ")
+            ):
+                if legacy_openclaw_node is None:
+                    raise AuditError(
+                        "legacy OpenClaw history requires configured ownership"
+                    )
+                if not re.fullmatch(
+                    r"session-(?:\d{4}-\d{2}-\d{2}|unknown-date)_[^/]+\.md",
+                    PurePosixPath(relative_path).name,
+                ):
+                    raise AuditError("unrecognized legacy OpenClaw filename")
+                canonical, session_id = _legacy_openclaw(text, legacy_openclaw_node)
+                semantic = _legacy_openclaw_digest(text)
+                if semantic is None:
+                    raise AuditError(
+                        "legacy OpenClaw history contains no recognized events"
+                    )
+                return InventoryEntry(
+                    relative_path,
+                    digest,
+                    (harness, legacy_openclaw_node, session_id),
+                    legacy_kind,
+                    canonical,
+                    title,
+                    True,
+                    semantic,
+                )
             if legacy_kind == "history":
                 tool_value = _legacy_value(headers.get("Tool", ""))
                 if tool_value:
@@ -169,14 +251,18 @@ def entry_from_content(
                 host = _legacy_value(headers.get("Host", ""))
                 session_id = _legacy_value(headers.get("Session ID", ""))
                 if not harness or not host or not session_id:
-                    raise AuditError("legacy history output is missing identity headers")
+                    raise AuditError(
+                        "legacy history output is missing identity headers"
+                    )
                 identity = (harness, host, session_id)
             elif legacy_kind == "prompts":
                 tool_value = _legacy_value(headers.get("Tool", ""))
                 harness = _LEGACY_TOOL_NAMES.get(tool_value)
                 host = _legacy_value(headers.get("Host", ""))
                 if not harness or not host:
-                    raise AuditError("legacy prompt output is missing ownership headers")
+                    raise AuditError(
+                        "legacy prompt output is missing ownership headers"
+                    )
             else:
                 raise AuditError("invalid legacy output kind")
             if harness:
@@ -273,6 +359,8 @@ def scan_inventory(manifest: Manifest) -> OutputInventory:
                     compatibility_rule=manifest.output.compatibility_rule,
                     legacy_kind="history",
                     legacy_harness=legacy_harness,
+                    legacy_openclaw_node=manifest.output.legacy_openclaw_node,
+                    preserve_static=manifest.output.preserve_static(relative),
                 )
             )
     history_by_name: dict[tuple[str, str, str], InventoryEntry] = {}
@@ -280,7 +368,11 @@ def scan_inventory(manifest: Manifest) -> OutputInventory:
         if entry.kind != "history" or entry.identity is None:
             continue
         history_by_name[
-            (entry.identity[0], entry.identity[1], PurePosixPath(entry.relative_path).name)
+            (
+                entry.identity[0],
+                entry.identity[1],
+                PurePosixPath(entry.relative_path).name,
+            )
         ] = entry
 
     directory = manifest.output.prompt_directory
@@ -299,7 +391,9 @@ def scan_inventory(manifest: Manifest) -> OutputInventory:
             seen.add(relative)
             content = path.read_bytes()
             probe_headers, _title = _headers(content.decode("utf-8", errors="replace"))
-            harness = _LEGACY_TOOL_NAMES.get(_legacy_value(probe_headers.get("Tool", "")))
+            harness = _LEGACY_TOOL_NAMES.get(
+                _legacy_value(probe_headers.get("Tool", ""))
+            )
             host = _legacy_value(probe_headers.get("Host", ""))
             name = path.name
             names = [name]
@@ -321,6 +415,7 @@ def scan_inventory(manifest: Manifest) -> OutputInventory:
                     legacy_kind="prompts",
                     legacy_harness=harness,
                     legacy_identity=identity,
+                    preserve_static=manifest.output.preserve_static(relative),
                 )
             )
     identities: dict[tuple[tuple[str, str, str], str], list[InventoryEntry]] = {}
@@ -394,6 +489,12 @@ def audit_plan(
             "Project": session.project,
         }
         required.update(manifest.output.encryption_attributes)
+        required.update(
+            {
+                key: redactor.apply(value)[0]
+                for key, value in metadata_headers(session, manifest.output).items()
+            }
+        )
         for key, value in required.items():
             if headers.get(key) != value:
                 raise AuditError(f"new output has an invalid {key} header")

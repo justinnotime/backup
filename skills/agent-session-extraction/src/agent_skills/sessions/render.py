@@ -23,9 +23,7 @@ def _without_trailing_whitespace(text: str) -> str:
 
 def _quote(text: str) -> str:
     text = _without_trailing_whitespace(text)
-    return "\n".join(
-        f"> {line}" if line else ">" for line in text.splitlines()
-    )
+    return "\n".join(f"> {line}" if line else ">" for line in text.splitlines())
 
 
 def _title(session: Session) -> str:
@@ -34,6 +32,22 @@ def _title(session: Session) -> str:
     )
     title = event.text.splitlines()[0].strip().lstrip("#").strip()
     return (title[:70].rstrip() or "Untitled session").replace("`", "'")
+
+
+def metadata_headers(session: Session, output: OutputSpec) -> dict[str, str]:
+    """Render only explicitly selected scalar metadata as single-line headers."""
+    values = {}
+    for key, field in output.metadata_headers.items():
+        value = session.metadata.get(field)
+        if value is None or value == "":
+            continue
+        if not isinstance(value, (str, int, float, bool)):
+            raise ValueError("selected session metadata must be scalar")  # noqa: TRY004
+        rendered = str(value).strip()
+        if any(character in rendered for character in "\r\n\0"):
+            raise ValueError("selected session metadata must be a single line")
+        values[key] = rendered
+    return values
 
 
 def _headers(session: Session, output: OutputSpec, kind: str) -> list[str]:
@@ -50,6 +64,10 @@ def _headers(session: Session, output: OutputSpec, kind: str) -> list[str]:
     lines.extend([f"Source: {session.source_ref}", f"Project: {session.project}"])
     for key in sorted(output.encryption_attributes):
         lines.append(f"{key}: {output.encryption_attributes[key]}")
+    lines.extend(
+        f"{key}: {value}"
+        for key, value in sorted(metadata_headers(session, output).items())
+    )
     return lines
 
 

@@ -18,7 +18,11 @@ from .pipeline import (
 )
 from .reconcile import clear_failure_marker, write_failure_marker
 from .redact import Redactor
-from .sources import SourceAccessError, validate_configured_path
+from .sources import (
+    SourceAccessError,
+    session_metadata_source,
+    validate_configured_path,
+)
 
 
 def _environment(environ: Mapping[str, str] | None) -> Mapping[str, str]:
@@ -98,6 +102,9 @@ def doctor(
             continue
         try:
             validate_configured_path(source)
+            metadata_source = session_metadata_source(source)
+            if metadata_source is not None:
+                validate_configured_path(metadata_source)
             capabilities = decoder_for(source.harness).capabilities()
             sources.append(
                 {

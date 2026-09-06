@@ -227,13 +227,16 @@ class OpenClawDecoder:
         sessions: tuple[DecodedSession, ...] = ()
         if direct_count >= minimum and len(events) >= minimum_total:
             metadata: dict[str, Any] = {}
+            session_header = dict(header)
+            selected_metadata = options.get("sessions_metadata", {}).get(session_id, {})
+            session_header.update(selected_metadata)
             if options.get("include_channel_metadata") is True:
-                channel = header.get("channel") or options.get("channel")
+                channel = session_header.get("channel") or options.get("channel")
                 if isinstance(channel, str) and channel:
                     metadata["channel"] = channel
             if options.get("include_session_metadata") is True:
                 for field in _string_tuple(options.get("session_metadata_fields", ())):
-                    value = header.get(field)
+                    value = session_header.get(field)
                     if isinstance(value, (str, int, float, bool)) or value is None:
                         metadata[field] = value
             project_hint = options.get("project_hint")
