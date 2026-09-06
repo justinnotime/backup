@@ -57,6 +57,7 @@ reusing that name removes the redirect.
 | `skills/google-chat-archive/` | Caller-configured Google Chat space and direct-message archive |
 | `skills/happy-tmux-title/` | Exact tmux window lookup for Happy conversation titles |
 | `skills/cross-ref-lint/` | Local Markdown link validation with caller-owned exclusions |
+| `skills/draft-human-reply/` | Natural reply drafting with optional private writing preferences |
 | `skills/agent-session-extraction/src/agent_skills/sessions/` | Package-owned normalized-session runtime |
 | `skills/<name>/tests/` | Tests owned and runnable by that Skill |
 
@@ -191,6 +192,7 @@ or shared source directory. Run additional checks from the affected package:
 (cd skills/google-chat-archive && uv run --locked pytest tests)
 (cd skills/happy-tmux-title && uv run --locked pytest tests) # requires tmux
 (cd skills/cross-ref-lint && uv run --locked pytest tests)
+(cd skills/draft-human-reply && uv run --locked skills-ref validate .) # format check, no runtime code
 (cd skills/slack-archive && uv run --locked pytest tests)
 (cd skills/whatsapp-archive && uv run --locked pytest tests && npm ci --prefix bridge && npm test --prefix bridge)
 ```
