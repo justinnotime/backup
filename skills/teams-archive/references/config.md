@@ -78,3 +78,13 @@ responses under the archive's `.debug/`; do not publish that directory.
 
 Restore the previous package revision to roll back program behavior. Retain
 the caller's archive and state; the migration does not rename historical data.
+
+## Portable home paths
+
+Use `~` for path settings and `{home}` inside `publish.command` arguments.
+The home comes from the running user's environment, without a shell. Keep
+repository paths relative to `base_dir` where possible. After moving a checkout,
+regenerate external scheduler/service definitions that captured absolute paths.
+
+`command_environment` values expand environment variables such as `$HOME` and
+`${PATH}` from the caller's environment. This does not execute shell syntax.

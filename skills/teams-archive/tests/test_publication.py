@@ -146,3 +146,23 @@ else:
     assert len(images) == 1 and images[0].read_bytes() == b'SYNTHETIC_IMAGE'
     assert (tmp_path / 'staged/progress.json').is_file()
     assert not (tmp_path / 'state').exists()
+
+
+def test_home_paths_and_environment_follow_the_caller(archive, monkeypatch, tmp_path):
+    home = tmp_path / 'another user'
+    monkeypatch.setenv('HOME', str(home))
+    monkeypatch.setenv('EXAMPLE_TOOLS', str(home / 'tools'))
+    cfg = publish_config(tmp_path, state_file='~/state/teams.json', command_environment={
+        'PATH': '$HOME/bin:${EXAMPLE_TOOLS}:/usr/bin',
+    })
+    document = yaml.safe_load(cfg.read_text())
+    document['teams']['publish']['command'] = ['publisher', '--lock', '{home}/locks/chat.lock', '--']
+    cfg.write_text(yaml.safe_dump(document))
+    seen = []
+    monkeypatch.setattr(archive.subprocess, 'run', lambda argv, **kw: seen.append((argv, kw)) or SimpleNamespace(returncode=0))
+    assert archive.main(['--config', str(cfg), '--publish']) == 0
+    argv, options = seen.pop()
+    assert argv[2] == str(home / 'locks/chat.lock')
+    assert archive.STATE_FILE == home / 'state/teams.json'
+    assert options['env']['PATH'] == f'{home}/bin:{home}/tools:/usr/bin'
+    assert not home.exists()

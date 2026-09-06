@@ -129,3 +129,16 @@ The command exits nonzero on reader/refresh failures and preserves the external
 publisher's exit code. It refuses to combine publication with dry-run or other
 operation modes. A successful direct reader run alone does not establish that
 anything was published.
+
+## Portable home paths
+
+Use `~` for path settings and `{home}` inside `publish.command` arguments.
+The home comes from the running user's environment, without a shell. Keep
+repository paths relative to `base_dir` where possible. After moving a checkout,
+regenerate external scheduler/service definitions that captured absolute paths.
+
+`command_environment` values expand environment variables such as `$HOME` and
+`${PATH}` from the caller's environment. This does not execute shell syntax.
+`bridge.node` also expands `~` and environment variables. Use `node` when it
+is on the configured PATH; an explicit interpreter path may stay in private
+configuration when the deployment requires a particular installed version.
