@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+skill_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
+python=${GITHUB_ARCHIVE_PYTHON:-}
+if [ -z "$python" ]; then
+    if [ -x "$skill_dir/.venv/bin/python" ]; then
+        python="$skill_dir/.venv/bin/python"
+    else
+        python=python3
+    fi
+fi
+export PYTHONPATH="$skill_dir/src${PYTHONPATH:+:$PYTHONPATH}"
+exec "$python" -B -m issue_graph "$@"

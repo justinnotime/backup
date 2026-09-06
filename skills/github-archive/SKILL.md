@@ -1,6 +1,6 @@
 ---
 name: github-archive
-description: Mirror configured GitHub issues, pull requests, and comments into a local Markdown archive. Use for a repeatable GitHub archive, incremental refresh, or recovery of missing archive files using caller-owned configuration and state.
+description: Mirror configured GitHub issues, pull requests, and comments into a local Markdown archive, or build dependency graphs, activity timelines and inventories from an explicitly selected local mirror. Uses caller-owned repository selection, configuration and state.
 ---
 
 # GitHub archive
@@ -9,6 +9,12 @@ Use this package's `scripts/sync`. It performs read-only GitHub requests through
 an externally authenticated `gh` command and writes only the configured local
 archive and state. It does not commit, push, send messages, or call a language
 model.
+
+Use `scripts/graph --input-dir /path/to/selected/archive` to build local DOT
+graphs, a text timeline, inventory JSON or statistics. This entry makes no
+network requests or language-model calls and does not need GitHub credentials.
+Read [local graphs and timelines](references/graphs.md) for filters, output
+modes and how to interpret the archived relationships.
 
 ## Setup and run
 

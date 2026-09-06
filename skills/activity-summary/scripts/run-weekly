@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+SKILL_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+export PYTHONPATH="$SKILL_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONDONTWRITEBYTECODE=1
+exec "${ACTIVITY_SUMMARY_PYTHON:-python3}" -B -m activity_summary.scheduled weekly "$@"
