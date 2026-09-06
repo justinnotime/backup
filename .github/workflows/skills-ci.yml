@@ -58,6 +58,22 @@ jobs:
             kind: python
             python: "3.14"
             check: Python 3.14
+          - skill: prompt-translation
+            kind: python
+            python: "3.10"
+            check: Python 3.10
+          - skill: prompt-translation
+            kind: python
+            python: "3.14"
+            check: Python 3.14
+          - skill: document-facts
+            kind: python
+            python: "3.10"
+            check: Python 3.10
+          - skill: document-facts
+            kind: python
+            python: "3.14"
+            check: Python 3.14
           - skill: structure-lint
             kind: python
             python: "3.10"
@@ -304,6 +320,19 @@ jobs:
           uv run --no-sync ruff check .
           uv run --no-sync ruff format --check .
           sh -n scripts/sync-emails scripts/sync-calendar scripts/sync-meetings
+          if [[ "${{ matrix.python }}" != "3.10" ]]; then
+            uv run --no-sync agentskills validate "$PWD"
+          fi
+      - name: Lint content pipelines
+        if: matrix.skill == 'prompt-translation' || matrix.skill == 'document-facts'
+        working-directory: ${{ runner.temp }}/skill-check/${{ matrix.skill }}
+        run: |
+          uv run --no-sync ruff check .
+          uv run --no-sync ruff format --check .
+          case "$SKILL" in
+            prompt-translation) sh -n scripts/translate scripts/validate scripts/run ;;
+            document-facts) sh -n scripts/extract ;;
+          esac
           if [[ "${{ matrix.python }}" != "3.10" ]]; then
             uv run --no-sync agentskills validate "$PWD"
           fi
