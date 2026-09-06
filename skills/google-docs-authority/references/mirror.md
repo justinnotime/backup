@@ -58,7 +58,18 @@ scripts/sync --config /private/documents.json --from-cache --force
 ```
 
 Native Markdown is preferred, with HTML conversion for unsupported native
-exports. Unchanged documents retain their archive. Titles can rename directories
+exports. A failed HTTP request or timeout during the initial Drive version/name
+preflight falls back to a full export; this optimization is not required for
+mirroring. Authentication/configuration failures and metadata needed to complete
+an export remain errors. The fallback still validates the document and saves
+progress only when the run succeeds.
+
+Large-document export links may redirect between allowed Google HTTPS asset
+hosts. Every destination is validated, and a host change removes authorization
+and cookie headers; the standard redirect limit still applies. OAuth exchanges,
+ordinary API calls and original-image requests do not follow redirects.
+
+Unchanged documents retain their archive. Titles can rename directories
 while their document identity stays stable. Multi-tab documents retain a linked
 index and nested tab paths. Images retain content-derived names and original
 bytes where available. LFS pointers are never treated as decoded pixels, and a
