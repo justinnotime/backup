@@ -1,0 +1,28 @@
+{
+  "nodes": {
+    "node-a": {
+      "session_extraction": "sole-writer",
+      "writes_backup": true,
+      "receives_backup": [
+        "node-a",
+        "node-b",
+        "retired-node"
+      ],
+      "syncthing_folder_type": "sendreceive",
+      "verified": true
+    },
+    "node-b": {
+      "session_extraction": "consumer",
+      "writes_backup": true,
+      "receives_backup": [
+        "node-a",
+        "node-b"
+      ],
+      "syncthing_folder_type": "sendreceive",
+      "verified": true
+    }
+  },
+  "retired_backup_directories": [
+    "retired-node"
+  ]
+}

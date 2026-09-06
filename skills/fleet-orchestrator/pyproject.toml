@@ -1,12 +1,12 @@
 [project]
-name = "fleet-orchestrator-checks"
-version = "0.1.0"
-description = "Development checks for the fleet-orchestrator Skill"
+name = "fleet-orchestrator"
+version = "0.2.0"
+description = "Standalone fleet task tracking, durable messaging, and terminal coordination"
 requires-python = ">=3.11"
 dependencies = []
 
 [dependency-groups]
-dev = ["skills-ref"]
+dev = ["skills-ref", "pytest", "ruff"]
 
 [tool.uv]
 package = false

@@ -60,14 +60,16 @@ reusing that name removes the redirect.
 | `skills/draft-human-reply/` | Natural reply drafting with optional private writing preferences |
 | `skills/pr-status-table/` | Current pull request reporting with an optional private format |
 | `skills/realign/` | Evidence-based comparison of recent work with the user's objective |
-| `skills/secret-lint/` | Credential exposure audit procedure with redacted reporting |
+| `skills/secret-lint/` | Credential scanner, controlled text redaction and audit instructions |
 | `skills/privacy-lint/` | Publication privacy review with optional private identifier patterns |
 | `skills/teams-send/` | Authorized Teams chat sending through caller-owned credentials or an external connector |
 | `skills/chat-mentions/` | Read-only Teams attention collection and a local reply-draft box |
-| `skills/agent-bus/` | Coordination transport instructions with caller-owned commands and identity policy |
-| `skills/fleet-orchestrator/` | Work tracking instructions with a caller-owned orchestrator and private operating profile |
+| `skills/agent-bus/` | Messaging workflow for the public fleet runtime and caller-owned identity policy |
+| `skills/fleet-orchestrator/` | Standalone ORC engine, durable local/Matrix transport, terminal helpers, and configurable private policy |
+| `skills/genteam/` | Configurable channel and thread archives, cookie setup and authorized message sending |
+| `skills/repository-publish/` | Transactional Git publication, isolated writers, durable state, and verified LFS delivery |
 | `skills/google-docs-authority/` | Caller-configured document publication, authority registry and stable text comparison |
-| `skills/structure-lint/` | Repository structure review using caller-owned contracts and checks |
+| `skills/structure-lint/` | Runnable repository structure checks with caller-owned metadata, layout and reference rules |
 | `skills/chat-draft/` | Targeted chat reading and reply drafting through configured readers |
 | `skills/agent-session-extraction/src/agent_skills/sessions/` | Package-owned normalized-session runtime |
 | `skills/<name>/tests/` | Tests owned and runnable by that Skill |
@@ -206,14 +208,16 @@ or shared source directory. Run additional checks from the affected package:
 (cd skills/draft-human-reply && uv run --locked skills-ref validate "$PWD") # format check, no runtime code
 (cd skills/pr-status-table && uv run --locked skills-ref validate "$PWD")
 (cd skills/realign && uv run --locked skills-ref validate "$PWD")
-(cd skills/secret-lint && uv run --locked skills-ref validate "$PWD")
+(cd skills/secret-lint && uv run --locked pytest tests)
 (cd skills/privacy-lint && uv run --locked skills-ref validate "$PWD")
 (cd skills/teams-send && uv run --locked pytest tests)
 (cd skills/chat-mentions && uv run --locked pytest tests)
 (cd skills/agent-bus && uv run --locked skills-ref validate "$PWD")
-(cd skills/fleet-orchestrator && uv run --locked skills-ref validate "$PWD")
+(cd skills/fleet-orchestrator && uv run --locked pytest tests -q)
+(cd skills/repository-publish && uv run --locked pytest tests -q)
+(cd skills/genteam && uv run --locked pytest tests)
 (cd skills/google-docs-authority && uv run --locked pytest tests)
-(cd skills/structure-lint && uv run --locked skills-ref validate "$PWD")
+(cd skills/structure-lint && uv run --locked pytest tests)
 (cd skills/chat-draft && uv run --locked skills-ref validate "$PWD")
 (cd skills/slack-archive && uv run --locked pytest tests)
 (cd skills/whatsapp-archive && uv run --locked pytest tests && npm ci --prefix bridge && npm test --prefix bridge)

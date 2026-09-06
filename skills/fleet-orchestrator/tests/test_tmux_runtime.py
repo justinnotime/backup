@@ -1,0 +1,113 @@
+"""Tests for the machine-local tmux server selector and shared consumers."""
+
+import importlib.util
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts" / "lib"))
+
+import tmux_runtime  # noqa: E402
+import pane_sense  # noqa: E402
+import workplane  # noqa: E402
+
+
+def load(script: str, name: str):
+    spec = importlib.util.spec_from_file_location(name, ROOT / "scripts" / script)
+    mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+TMUX_SEND = load("agent-tmux-send.py", "agent_tmux_send_for_runtime_tests")
+ORCHESTRATOR = load(
+    "fleet-orchestrator.py", "fleet_orchestrator_for_runtime_tests"
+)
+
+
+class TmuxRuntimeTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "runtime"
+        self.env = mock.patch.dict(os.environ, {
+            "NOTES_RUNTIME_DIR": str(self.root),
+        })
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        os.environ.pop("NW_TMUX_SERVER", None)
+        os.environ.pop("DISPATCH_LEDGER_ACTOR", None)
+        self.addCleanup(self.tmp.cleanup)
+
+    def write_config(self, value: str):
+        path = tmux_runtime.config_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(value, encoding="utf-8")
+        return path
+
+    def test_default_without_selector(self):
+        self.assertEqual(tmux_runtime.configured_server(), (None, "default"))
+        self.assertEqual(tmux_runtime.base_cmd(), ["tmux"])
+
+    def test_machine_selector_is_shared_by_sense_and_send(self):
+        self.write_config("tmux37\n")
+        self.assertEqual(tmux_runtime.base_cmd(), ["tmux", "-L", "tmux37"])
+        self.assertEqual(TMUX_SEND.tmux_base_cmd(), ["tmux", "-L", "tmux37"])
+        with mock.patch("subprocess.run") as run:
+            run.return_value = subprocess.CompletedProcess([], 0, "ok", "")
+            self.assertEqual(pane_sense.tmux_out(["display-message"]), "ok")
+        self.assertEqual(run.call_args.args[0][:3], ["tmux", "-L", "tmux37"])
+
+    def test_environment_override_wins_for_staging(self):
+        self.write_config("production")
+        with mock.patch.dict(os.environ, {"NW_TMUX_SERVER": "staging"}):
+            self.assertEqual(tmux_runtime.configured_server(), ("staging", "env"))
+            self.assertEqual(tmux_runtime.base_cmd(), ["tmux", "-L", "staging"])
+
+    def test_invalid_selector_fails_closed(self):
+        path = self.write_config("tmux37 -- bad")
+        with self.assertRaisesRegex(tmux_runtime.TmuxRuntimeConfigError,
+                                    "invalid tmux server"):
+            tmux_runtime.configured_server()
+        self.assertIn(str(path), tmux_runtime.identity())
+
+    def test_unreachable_server_is_unknown_not_empty_fleet(self):
+        self.write_config("missing")
+        failed = subprocess.CompletedProcess([], 1, "", "no server")
+        with mock.patch("subprocess.run", return_value=failed):
+            with self.assertRaisesRegex(RuntimeError, "no server"):
+                pane_sense.agent_panes()
+            with self.assertRaisesRegex(RuntimeError, "no server"):
+                pane_sense.window_titles()
+
+    def test_identity_and_succession_checks_use_selected_server(self):
+        with mock.patch.dict(os.environ, {
+            "NW_TMUX_SERVER": "fleet-alpha", "TMUX_PANE": "%1"
+        }, clear=False):
+            identity_result = subprocess.CompletedProcess(
+                [], 0, "codex@0:14.0\n", ""
+            )
+            with mock.patch.object(
+                workplane.subprocess, "run", return_value=identity_result
+            ) as run:
+                self.assertEqual(workplane.whoami(), "codex@0:14.0")
+            self.assertEqual(run.call_args.args[0][:3],
+                             ["tmux", "-L", "fleet-alpha"])
+
+            pane_result = subprocess.CompletedProcess([], 0, "codex\n", "")
+            with mock.patch.object(
+                ORCHESTRATOR.subprocess, "run", return_value=pane_result
+            ) as run:
+                self.assertEqual(ORCHESTRATOR._pane_current_command("%1"), "codex")
+            self.assertEqual(run.call_args.args[0][:3],
+                             ["tmux", "-L", "fleet-alpha"])
+
+
+if __name__ == "__main__":
+    unittest.main()

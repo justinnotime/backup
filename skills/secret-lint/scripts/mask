@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+exec "${SECRET_LINT_PYTHON:-python3}" -B "$ROOT/src/secret_lint.py" mask "$@"

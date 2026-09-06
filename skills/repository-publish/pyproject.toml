@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "repository-publish-skill"
+version = "0.1.0"
+description = "Transactional Git publication with isolated writers and staged progress"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+repository-publish = "repository_publish:main"
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "ruff>=0.12,<1", "skills-ref; python_version >= '3.11'"]
+
+[tool.uv.sources]
+skills-ref = { git = "https://github.com/agentskills/agentskills.git", rev = "69ef37e9424c0a7ea9dd2293b559e43ec8176379", subdirectory = "skills-ref" }
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = ["repository_publish"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100

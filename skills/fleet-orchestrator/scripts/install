@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+"""Install portable command launchers; do not configure services or schedules."""
+from __future__ import annotations
+
+import argparse
+import os
+from pathlib import Path
+import shlex
+import shutil
+import tempfile
+
+HERE = Path(__file__).resolve().parent
+COMMANDS = {"orc": "orc", "agent-bus": "matrix-bus.sh", "tview": "tview",
+            "orc-turn-report": "orc-turn-report.py", "fleet-rollout": "rollout-control.py"}
+MARKER = "# fleet-orchestrator public command launcher"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--bin-dir", type=Path, default=Path.home() / ".local/bin")
+    parser.add_argument("--replace", action="store_true", help="replace existing commands after saving backups")
+    parser.add_argument("--command", choices=COMMANDS, help="install only this command")
+    parser.add_argument("--target", type=Path, help="custom target for --command")
+    args = parser.parse_args()
+    if args.target and not args.command:
+        parser.error("--target requires --command")
+    selected = {args.command: COMMANDS[args.command]} if args.command else COMMANDS
+    pending = []
+    for name, entry in selected.items():
+        target = args.target or args.bin_dir / name
+        python = "python3 -B " if entry.endswith(".py") else ""
+        body = "#!/bin/sh\n" + MARKER + "\nexec " + python + shlex.quote(str(HERE / entry)) + ' "$@"\n'
+        if target.exists() or target.is_symlink():
+            if not target.is_symlink() and not target.is_file():
+                raise SystemExit(f"command target is not a file: {target}")
+            previous = target.read_bytes() if target.is_file() else b""
+            if not target.is_symlink() and previous == body.encode():
+                continue
+            if not args.replace and (target.is_symlink() or MARKER.encode() not in previous):
+                raise SystemExit(f"existing command requires --replace: {target}")
+        pending.append((name, target, body))
+    # Check conflicts before replacing any command.
+    for name, target, body in pending:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if args.replace and (target.exists() or target.is_symlink()):
+            fd, backup = tempfile.mkstemp(prefix=name + ".before-fleet-install-", dir=target.parent)
+            os.close(fd)
+            if target.is_symlink():
+                Path(backup).unlink()
+                os.symlink(os.readlink(target), backup)
+            else:
+                shutil.copy2(target, backup)
+        fd, temporary = tempfile.mkstemp(prefix=".fleet-launcher-", dir=target.parent)
+        try:
+            with os.fdopen(fd, "w") as stream:
+                stream.write(body)
+            os.chmod(temporary, 0o755)
+            os.replace(temporary, target)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+        print(f"installed {target}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

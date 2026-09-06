@@ -1,20 +1,27 @@
 ---
 name: fleet-orchestrator
 description: >-
-  Inspect and operate a caller-configured fleet work tracker: current tasks, dependencies, responsibilities, review evidence, blockers and handoffs. Use for fleet boards, dispatch requests, task progress, roles, goals, or fleet health questions. Requires an existing orchestrator and a private command profile; this Skill provides a workflow, not a scheduler or database implementation.
+  Run ORC task tracking, dependency scheduling, durable Agent Bus messaging, and tmux coordination with the bundled standalone runtime. Use for fleet boards, dispatch, responsibilities, review evidence, handoffs, and fleet health. Local mode needs no server; optional Matrix transport and personal policies use caller-owned configuration.
 ---
 
 # Fleet orchestration
 
-Read `FLEET_ORCHESTRATOR_PROFILE`, or
-`${XDG_CONFIG_HOME:-$HOME/.config}/fleet-orchestrator/profile.md`. It defines the
-existing command, selected fleet, state storage, local workflow and authority
-rules. An explicit user-provided equivalent can supply that context. Without
-it, report the missing backend information rather than guessing a database,
-endpoint or account. This package contains instructions only; it neither runs a
-scheduler nor provisions agents.
+This package includes the ORC engine, its SQLite store, durable Agent Bus,
+terminal helpers, harness hooks, and installation checks. It runs independently
+of any personal notes repository. See [runtime commands](references/runtime.md)
+for installation and [configuration](references/configuration.md) for optional
+transport, paths, and private policy. All runtime commands make zero LLM calls.
 
-Use the configured command as the work tracker. Read its current task data;
+Use `scripts/orc` from this package, or the installed `orc` command. A leading
+`--config /private/config.json` selects a complete runtime configuration; the
+same file can be selected through `FLEET_ORCHESTRATOR_CONFIG`. Without one, the
+runtime uses local state under XDG directories and a local message transport.
+
+Read `FLEET_ORCHESTRATOR_PROFILE`, or
+`${XDG_CONFIG_HOME:-$HOME/.config}/fleet-orchestrator/profile.md`, when present,
+for the caller's workflow and authority rules. Missing personal preferences do
+not prevent use of the bundled local runtime.
+Use ORC as the work tracker. Read its current task data;
 do not copy an easily recomputed board into a second long-lived status file.
 Preserve any named fleet selector on every call. Failure to resolve one fleet
 must not redirect an operation to another. Test or development commands must

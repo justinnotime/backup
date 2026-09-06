@@ -1,0 +1,22 @@
+{
+  "schema": "genteam/v1",
+  "base_url": "https://chat.example.test",
+  "cookie_file": "~/.config/example-chat/session-cookie",
+  "archive": {
+    "output_directory": "~/archives/example-chat",
+    "state_file": "~/.local/state/example-chat/genteam.state.json",
+    "repository_path": "archive/example-chat",
+    "selection": {
+      "enabled": true,
+      "mode": "whitelist",
+      "chats": [{"match": "example-project", "alias": "example-project"}],
+      "bootstrap_days": 90,
+      "threads": true
+    }
+  },
+  "send": {
+    "state_directory": "~/.local/state/example-chat/send",
+    "marker": "",
+    "audit_text_prefix_length": 0
+  }
+}

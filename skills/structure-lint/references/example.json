@@ -1,0 +1,29 @@
+{
+  "schema": "structure-lint/v1",
+  "checks": [
+    {
+      "type": "layout",
+      "document": "CONTRIBUTING.md",
+      "section": "## Layout",
+      "ignore_directories": ["tools"]
+    },
+    {
+      "type": "metadata",
+      "include": ["Docs/**/*.md"],
+      "exclude": ["Docs/README.md"],
+      "fields": ["title", "created"]
+    },
+    {
+      "type": "source_references",
+      "include": ["Docs/**/*.md"],
+      "prefixes": ["Inputs/"]
+    },
+    {
+      "type": "navigation",
+      "include": ["Docs/**/*.md"],
+      "exclude": ["*/README.md"],
+      "indexes": ["Docs/**/README.md"],
+      "severity": "warn"
+    }
+  ]
+}
