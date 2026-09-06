@@ -151,7 +151,7 @@ jobs:
       - name: Validate instruction-only Skill
         if: matrix.kind == 'instruction'
         working-directory: ${{ runner.temp }}/skill-check/${{ matrix.skill }}
-        run: uv run --locked skills-ref validate .
+        run: uv run --locked skills-ref validate "$PWD"
       - name: Run shell package tests
         if: matrix.kind == 'shell'
         working-directory: ${{ runner.temp }}/skill-check/${{ matrix.skill }}

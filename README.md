@@ -194,9 +194,9 @@ or shared source directory. Run additional checks from the affected package:
 (cd skills/google-chat-archive && uv run --locked pytest tests)
 (cd skills/happy-tmux-title && uv run --locked pytest tests) # requires tmux
 (cd skills/cross-ref-lint && uv run --locked pytest tests)
-(cd skills/draft-human-reply && uv run --locked skills-ref validate .) # format check, no runtime code
-(cd skills/pr-status-table && uv run --locked skills-ref validate .)
-(cd skills/realign && uv run --locked skills-ref validate .)
+(cd skills/draft-human-reply && uv run --locked skills-ref validate "$PWD") # format check, no runtime code
+(cd skills/pr-status-table && uv run --locked skills-ref validate "$PWD")
+(cd skills/realign && uv run --locked skills-ref validate "$PWD")
 (cd skills/slack-archive && uv run --locked pytest tests)
 (cd skills/whatsapp-archive && uv run --locked pytest tests && npm ci --prefix bridge && npm test --prefix bridge)
 ```
