@@ -14,6 +14,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - skill: agent-bus
+            kind: instruction
+            python: "3.14"
+            check: Skill format
+          - skill: fleet-orchestrator
+            kind: instruction
+            python: "3.14"
+            check: Skill format
           - skill: google-docs-authority
             kind: python
             python: "3.10"
