@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "happy-tmux-title-skill"
+version = "0.1.0"
+description = "Resolve the current tmux window for Happy conversation titles"
+requires-python = ">=3.10"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "ruff>=0.16,<1"]
+
+[project.scripts]
+happy-tmux-window-index = "happy_tmux_title:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = ["happy_tmux_title"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

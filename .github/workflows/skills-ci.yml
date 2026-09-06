@@ -14,6 +14,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - skill: happy-tmux-title
+            kind: python
+            python: "3.10"
+            check: Python 3.10
+          - skill: happy-tmux-title
+            kind: python
+            python: "3.14"
+            check: Python 3.14
           - skill: google-chat-archive
             kind: python
             python: "3.10"
@@ -105,10 +113,11 @@ jobs:
           python-version: ${{ matrix.python }}
           enable-cache: false
       - name: Install test command dependencies
-        if: matrix.kind == 'shell' || matrix.skill == 'agent-session-extraction'
+        if: matrix.kind == 'shell' || matrix.skill == 'agent-session-extraction' || matrix.skill == 'happy-tmux-title'
         run: |
           case "$SKILL" in
             agent-session-extraction) packages=(git-crypt) ;;
+            happy-tmux-title) packages=(tmux) ;;
             state-backup|agent-harness-profiles) packages=(rsync sqlite3) ;;
           esac
           sudo apt-get update -qq
@@ -151,6 +160,12 @@ jobs:
         run: |
           uv run --no-sync ruff check src tests --select E4,E7,E9,F
           sh -n scripts/sync
+      - name: Lint Happy tmux title
+        if: matrix.skill == 'happy-tmux-title'
+        working-directory: ${{ runner.temp }}/skill-check/${{ matrix.skill }}
+        run: |
+          uv run --no-sync ruff check src tests --select E4,E7,E9,F
+          sh -n scripts/window-index
       - name: Check WhatsApp archive and bridge
         if: matrix.skill == 'whatsapp-archive'
         working-directory: ${{ runner.temp }}/skill-check/${{ matrix.skill }}
