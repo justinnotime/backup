@@ -448,9 +448,12 @@ def main(argv=None):
         if not isinstance(settings, dict) or not isinstance(settings.get("slack"), dict):
             raise ArchiveError("configuration requires a slack mapping")
         cfg = settings["slack"]
-        base_value = args.base_dir or cfg.get("base_dir")
-        base = Path(base_value).expanduser() if base_value else config_path.parent
-        base = (base if base.is_absolute() else config_path.parent / base).resolve()
+        if args.base_dir:
+            base = Path(args.base_dir).expanduser().resolve()
+        else:
+            base_value = cfg.get("base_dir")
+            base = Path(base_value).expanduser() if base_value else config_path.parent
+            base = (base if base.is_absolute() else config_path.parent / base).resolve()
         def path(value, label):
             if not isinstance(value, str) or not value:
                 raise ArchiveError(f"{label} is required")

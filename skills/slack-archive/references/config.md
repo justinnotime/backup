@@ -5,7 +5,7 @@ contains the following fields:
 
 | Field | Meaning |
 | --- | --- |
-| `base_dir` | Path base, relative to the configuration directory if not absolute. Defaults to that directory; overridden by `--base-dir`. |
+| `base_dir` | Path base, relative to the configuration directory if not absolute. Defaults to that directory. `--base-dir` overrides it; a relative CLI value uses the invoking working directory, retaining the original CLI behavior. |
 | `output_dir`, `state_file` | Required archive directory and state file; overridden by `--output-dir` and `--state-file`. Relative paths use the selected base directory. |
 | `token_dir` | Optional credential directory, overridden by `--token-dir`. Each workspace's explicit `token_file` takes precedence. |
 | `enabled` | Explicit `false` disables sync. Defaults to enabled. |

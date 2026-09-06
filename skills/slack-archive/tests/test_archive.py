@@ -404,3 +404,14 @@ def test_configured_base_and_credentials_support_direct_entry(archive):
     path.write_text(yaml.safe_dump(ar["settings"]))
     assert a.main(["--config", str(path)]) == 0
     assert (ar["root"] / "state/slack.json").exists()
+
+
+def test_relative_cli_base_keeps_working_directory_semantics(archive, monkeypatch):
+    ar = archive
+    caller = ar["root"] / "caller"
+    selected = caller / "selected"
+    selected.mkdir(parents=True)
+    (selected / "token").write_text("synthetic-credential")
+    monkeypatch.chdir(caller)
+    assert ar["run"]("--base-dir", "selected") == 0
+    assert (selected / "state/slack.json").exists()
