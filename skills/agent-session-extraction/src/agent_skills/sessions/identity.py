@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections import defaultdict
+from datetime import datetime
 
 from .model import Session
 
@@ -31,13 +32,23 @@ def short_session_id(session_id: str) -> str:
     return cleaned[-12:] if len(cleaned) > 12 else cleaned
 
 
-def base_filename(
-    session: Session, strategy: str = "project-session-suffix"
-) -> str:
+def base_filename(session: Session, strategy: str = "project-session-suffix") -> str:
+    if strategy == "session-date-prefix-8":
+        source_date = None
+        if session.day is None:
+            value = session.metadata.get("timestamp")
+            if isinstance(value, str):
+                try:
+                    source_date = datetime.fromisoformat(value).strftime("%Y-%m-%d")
+                except ValueError:
+                    pass
+        selected_date = source_date or (
+            date_for(session) if session.started_at or session.day else "unknown-date"
+        )
+        return f"session-{selected_date}_{safe_component(session.session_id, limit=80)[:8]}.md"
     if strategy == "project-session-suffix":
         component = (
-            f"{safe_component(session.project)}_"
-            f"{short_session_id(session.session_id)}"
+            f"{safe_component(session.project)}_{short_session_id(session.session_id)}"
         )
     elif strategy == "session-prefix-8":
         component = safe_component(session.session_id, limit=80)[:8]
@@ -98,5 +109,9 @@ def relative_output_path(
     directory: str, layout: str, session: Session, filename: str
 ) -> str:
     if layout == "monthly":
+        if filename.startswith("session-"):
+            date_match = re.match(r"session-(\d{4}-\d{2})-\d{2}_", filename)
+            bucket = date_match.group(1) if date_match else "unknown"
+            return f"{directory}/{bucket}/{filename}"
         return f"{directory}/{date_for(session)[:7]}/{filename}"
     return f"{directory}/{filename}"

@@ -82,6 +82,26 @@ candidate is decoded normally. Non-empty values are valid only with
 | Cursor | `session_id`, `project_hint`, `minimum_user_events` |
 | OpenClaw | session/project hints, `minimum_user_events`, `minimum_total_events`, cron/notification/channel filters, and optional channel/session metadata fields |
 
+OpenClaw can read label/channel metadata from an explicitly configured absolute
+`decoder.sessions_metadata_path`. The file uses either a list of objects or an
+object containing a `sessions` list; each row has a unique non-empty `id` and
+optional string `label` and `channel`. No adjacent file is read by default. The
+file must satisfy the source's allowed lexical/resolved roots, forbidden path
+components, and symlink policy. `required_suffixes` constrains the main source
+root only. A configured metadata file that is missing or invalid fails the
+source; its contents are read through the same stable-byte reader as transcripts.
+Only label/channel fields are merged into selected session metadata. Enable
+`include_session_metadata` with `session_metadata_fields=["timestamp", "label"]`
+and `include_channel_metadata` to retain those fields. An explicit `channel`
+value may supply the fallback when a record has no channel.
+
+`output.metadata_headers` maps non-reserved output header names to selected
+scalar metadata fields, for example `{"Label":"label","Channel":"channel"}`.
+Absent values are omitted; multiline values are rejected. Rendered metadata
+passes through the same redactor and output audit as the transcript. A selected
+metadata change updates the existing session file even if its events are equal.
+This option is empty by default.
+
 OpenClaw applies `minimum_user_events` and `minimum_total_events` after its
 configured synthetic, operational-notification, and channel-forward filters;
 the latter counts the retained user and assistant events together.
@@ -114,7 +134,7 @@ the latter counts the retained user and assistant events together.
   `filename_strategy_by_harness` overrides it for named harnesses. Supported
   values are `project-session-suffix`, `session-prefix-8`,
   `session-last-component-prefix-8`, `session-suffix-8`, and
-  `node-session-sha256-12`; collision suffixes are still assigned from the
+  `node-session-sha256-12`, and `session-date-prefix-8`; collision suffixes are still assigned from the
   complete normalized identity set.
 - `output.day_split`: `off` (default), `hybrid`, or `all`. With `hybrid`, a
   session that already has a whole-session history file keeps that file for
@@ -189,3 +209,48 @@ before sources are opened.
 See `manifest.example.json` for placeholder structure. It is intentionally not
 runnable until every `/absolute/...` path is replaced by a consumer-owned
 location.
+
+## Adopting legacy OpenClaw output
+
+Omit `output.prompt_directory`, or set it to `null`, when only session history
+is owned by this writer. No prompt view is rendered, scanned, cleaned up or
+indexed, and `publisher.owned_subtrees` needs only the selected history paths.
+Existing prompt files outside those paths remain untouched. Index modes still
+apply to the selected history directories. A configured prompt directory keeps
+the normal prompt behavior and must remain disjoint from every history directory.
+
+An owning consumer can adopt old `# Claw Session` Markdown without copying an
+extractor. Choose a legacy Markdown compatibility rule and explicitly set
+`output.compatibility.legacy_openclaw_node` to the owning opaque node. Also
+route `output.history_directory_by_harness.openclaw` to the existing archive.
+The runtime recognizes the bold `Session ID` header and legacy user/assistant
+sections; it never infers the node from a machine name, file name, or body text.
+A contradictory explicit host or malformed session file fails inventory.
+
+Use `filename_strategy_by_harness.openclaw="session-date-prefix-8"` for new
+`session-YYYY-MM-DD_<id-prefix>.md` files. The date uses selected source-header
+`timestamp` metadata, then the first event date; a missing date uses
+`unknown-date` and monthly layout places it in `unknown/`. Existing recognized
+files stay at their existing paths. Equal event text and selected metadata keep
+old bytes unchanged. Growing sessions use the normal managed renderer at the
+same path; readers must accept both formats. `activity-summary` accepts both
+when the consumer selects a `claw` source. Use `day_split="off"` when preserving
+whole-session files is required; cleanup and index ownership remain independent
+explicit choices.
+
+Non-session Markdown stored with the archive can be preserved with
+`output.compatibility.static_paths` (literal repo-relative paths) or
+`static_patterns` (repo-relative non-recursive glob patterns). For example, a
+consumer could select `History/memo-????-??-??.md`. Every pattern is anchored to
+the full relative path and must lie inside a configured output directory.
+Matching files remain byte-for-byte and outside session cleanup; the runtime
+does not copy or refresh their source. A matching file containing a managed
+session marker, session identity header, or recognized conversation sections
+is rejected rather than hidden from reconciliation. Unconfigured files remain
+subject to ordinary inventory validation. Keep the owning consumer's actual
+paths, node labels, and patterns in private configuration.
+
+A caller of `decode_source_snapshots` that selects a sidecar must also supply
+its already-frozen `sessions_metadata` mapping in each snapshot's decoder
+options. The API never opens the configured metadata file behind a frozen-byte
+caller's back. Production extraction constructs this mapping itself.

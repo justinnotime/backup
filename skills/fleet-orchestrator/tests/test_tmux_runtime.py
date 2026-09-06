@@ -12,10 +12,6 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "lib"))
 
-import tmux_runtime  # noqa: E402
-import pane_sense  # noqa: E402
-import workplane  # noqa: E402
-
 
 def load(script: str, name: str):
     spec = importlib.util.spec_from_file_location(name, ROOT / "scripts" / script)
@@ -26,17 +22,34 @@ def load(script: str, name: str):
     return mod
 
 
-TMUX_SEND = load("agent-tmux-send.py", "agent_tmux_send_for_runtime_tests")
-ORCHESTRATOR = load(
-    "fleet-orchestrator.py", "fleet_orchestrator_for_runtime_tests"
-)
+# Imports capture some runtime defaults; never read the caller's fleet settings.
+with tempfile.TemporaryDirectory() as import_root:
+    import_config = Path(import_root) / "fleet-config.json"
+    import_config.write_text('{"schema":"fleet-runtime/v1"}', encoding="utf-8")
+    with mock.patch.dict(os.environ, {
+        "HOME": import_root,
+        "FLEET_ORCHESTRATOR_CONFIG": str(import_config),
+        "NOTES_RUNTIME_DIR": str(Path(import_root) / "runtime"),
+    }):
+        import tmux_runtime
+        import pane_sense
+        import workplane
+
+        TMUX_SEND = load("agent-tmux-send.py", "agent_tmux_send_for_runtime_tests")
+        ORCHESTRATOR = load(
+            "fleet-orchestrator.py", "fleet_orchestrator_for_runtime_tests"
+        )
 
 
 class TmuxRuntimeTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name) / "runtime"
+        configuration = Path(self.tmp.name) / "fleet-config.json"
+        configuration.write_text('{"schema":"fleet-runtime/v1"}', encoding="utf-8")
         self.env = mock.patch.dict(os.environ, {
+            "HOME": self.tmp.name,
+            "FLEET_ORCHESTRATOR_CONFIG": str(configuration),
             "NOTES_RUNTIME_DIR": str(self.root),
         })
         self.env.start()
@@ -50,6 +63,9 @@ class TmuxRuntimeTest(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(value, encoding="utf-8")
         return path
+
+    def test_selector_path_is_confined_to_this_test(self):
+        self.assertTrue(tmux_runtime.config_path().is_relative_to(self.root))
 
     def test_default_without_selector(self):
         self.assertEqual(tmux_runtime.configured_server(), (None, "default"))

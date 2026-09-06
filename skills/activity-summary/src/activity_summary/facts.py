@@ -509,12 +509,18 @@ def clean_prompt(body):
     return b
 
 
+def legacy_claw_format(text, source):
+    selected = next(
+        (item["format"] for item in SESSION_SOURCES if item["label"] == source), "history"
+    )
+    header = text.partition("\n---\n")[0]
+    managed = re.search(r"^- Managed-By: agent-session-extraction/v1\s*$", header, re.MULTILINE)
+    return selected == "claw" and not managed
+
+
 def real_user_prompts(text, source, T):
     out = []
-    if (
-        next((item["format"] for item in SESSION_SOURCES if item["label"] == source), "history")
-        == "claw"
-    ):
+    if legacy_claw_format(text, source):
         for m in re.finditer(
             "## \U0001f464 User \\((\\d{2}):(\\d{2})\\)\\s*\\n+(.+?)(?=\\n## |\\Z)", text, re.S
         ):
@@ -570,13 +576,7 @@ def session_events(repo, T):
             except OSError:
                 continue
             mins = []
-            if (
-                next(
-                    (item["format"] for item in SESSION_SOURCES if item["label"] == source),
-                    "history",
-                )
-                == "claw"
-            ):
+            if legacy_claw_format(text, source):
                 dm = CLAW_DATE.search(text)
                 fdate = dm.group(1) if dm else os.path.basename(p)[8:18]
                 if fdate != T:
@@ -599,6 +599,12 @@ def session_events(repo, T):
             m = re.search("Session ID:\\**\\s*`?([0-9a-f-]{8,})`?", text)
             if m:
                 sid = m.group(1)
+            elif selected["format"] == "claw":
+                m = re.search(
+                    r"^- Session: ([^\r\n]+)$", text.partition("\n---\n")[0], re.MULTILINE
+                )
+                if m:
+                    sid = m.group(1).strip()
             prompts = real_user_prompts(text, source, T)
             cron = CRON_TAG.search(text)
             if cron:

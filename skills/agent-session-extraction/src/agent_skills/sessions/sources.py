@@ -8,11 +8,11 @@ import sqlite3
 import stat
 import tempfile
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from urllib.parse import quote
 
-from .manifest import SourceSpec
+from .manifest import Discovery, SourceSpec
 from .model import SourceSnapshot
 
 
@@ -50,6 +50,21 @@ def _has_suffix(path: Path, suffixes: tuple[str, ...]) -> bool:
 class ValidatedRoot:
     lexical: Path
     resolved: Path
+
+
+def session_metadata_source(source: SourceSpec) -> SourceSpec | None:
+    """Select a declared metadata file without inferring adjacent read authority."""
+    path = source.decoder.get("sessions_metadata_path")
+    if path is None:
+        return None
+    return replace(
+        source,
+        path=Path(path),
+        path_kind="explicit",
+        root_policy=replace(source.root_policy, required_suffixes=()),
+        discovery=Discovery("file", (), ()),
+        snapshot="stable-bytes",
+    )
 
 
 def validate_configured_path(source: SourceSpec) -> ValidatedRoot:
@@ -407,13 +422,9 @@ def _sqlite_immutable_token(
         wal_token: tuple[int, ...] = (0, 0, 0, 0, 0)
         if os.path.lexists(wal):
             wal_descriptor = _open_read_only(wal, "SQLite WAL sidecar")
-            wal_stat = _validate_sqlite_sidecar(
-                wal, wal_descriptor, source, candidate
-            )
+            wal_stat = _validate_sqlite_sidecar(wal, wal_descriptor, source, candidate)
             if wal_stat.st_size:
-                raise SourceAccessError(
-                    "immutable SQLite access requires an empty WAL"
-                )
+                raise SourceAccessError("immutable SQLite access requires an empty WAL")
             wal_token = (
                 1,
                 wal_stat.st_dev,
@@ -467,10 +478,7 @@ def revalidate_snapshot(
         return
     if snapshot.stability_token is None:
         raise SourceAccessError("immutable SQLite snapshot has no stability token")
-    if (
-        _sqlite_immutable_token(snapshot.path, source, root)
-        != snapshot.stability_token
-    ):
+    if _sqlite_immutable_token(snapshot.path, source, root) != snapshot.stability_token:
         raise SourceAccessError("SQLite source changed during decoding")
 
 

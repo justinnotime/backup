@@ -82,6 +82,14 @@ jobs:
             kind: python
             python: "3.14"
             check: Python 3.14
+          - skill: markdown-issues
+            kind: python
+            python: "3.10"
+            check: Python 3.10
+          - skill: markdown-issues
+            kind: python
+            python: "3.14"
+            check: Python 3.14
           - skill: structure-lint
             kind: python
             python: "3.10"
@@ -353,6 +361,16 @@ jobs:
           uv run --no-sync ruff format --check src/issue_graph.py tests/test_graph.py
           bash -n scripts/sync
           sh -n scripts/graph
+          if [[ "${{ matrix.python }}" != "3.10" ]]; then
+            uv run --no-sync agentskills validate "$PWD"
+          fi
+      - name: Lint Markdown issue tracker
+        if: matrix.skill == 'markdown-issues'
+        working-directory: ${{ runner.temp }}/skill-check/${{ matrix.skill }}
+        run: |
+          uv run --no-sync ruff check .
+          uv run --no-sync ruff format --check .
+          sh -n scripts/issues
           if [[ "${{ matrix.python }}" != "3.10" ]]; then
             uv run --no-sync agentskills validate "$PWD"
           fi

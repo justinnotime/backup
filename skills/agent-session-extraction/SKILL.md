@@ -83,6 +83,11 @@ Use `sqlite-readonly` for a live or WAL-backed OpenCode database. Use
 `sqlite-immutable` only for a checkpointed snapshot whose producer guarantees
 immutability. Configure per-harness history directories and filename
 strategies in the manifest rather than adding consumer-specific render paths.
+Omit `output.prompt_directory` or set it to `null` for a history-only writer;
+only the configured history directories are scanned, written and indexed.
+For legacy OpenClaw files, explicitly configure ownership, original naming,
+selected metadata, and static-file preservation as described in
+[the manifest reference](references/manifest.md#adopting-legacy-openclaw-output).
 Use a legacy compatibility rule only while adopting existing output; it does
 not relax the contract for newly written output. The frozen legacy rule preserves
 recognized old prompt session files byte-for-byte and keeps every recognized

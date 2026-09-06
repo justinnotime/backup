@@ -1,0 +1,46 @@
+{
+  "schema": "markdown-issues/v1",
+  "repository_root": "/path/to/project",
+  "open_directory": "records/active",
+  "closed_directory": "records/resolved",
+  "actors": [
+    "writer",
+    "reviewer",
+    "unassigned"
+  ],
+  "default_actor": "writer",
+  "default_assignee": "unassigned",
+  "unassigned_actor": "unassigned",
+  "priorities": [
+    "P0",
+    "P1",
+    "P2"
+  ],
+  "kinds": [
+    "action",
+    "watch",
+    "external"
+  ],
+  "sub_states": [
+    "in-progress",
+    "blocked",
+    "waiting-review",
+    "waiting-human",
+    "scheduled"
+  ],
+  "related_path_prefixes": [
+    "records/",
+    "documents/"
+  ],
+  "stale_days": 30,
+  "idle_days": 14,
+  "headings": {
+    "context": "## Context",
+    "acceptance": "## Acceptance",
+    "notes": "## Notes"
+  },
+  "base_refs": [
+    "origin/main",
+    "HEAD"
+  ]
+}

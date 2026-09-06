@@ -240,6 +240,7 @@
         "exclude_operational_notifications": {"type": "boolean"},
         "retain_channel_forwarded": {"type": "boolean"},
         "exclude_cron_sessions": {"type": "boolean"},
+        "sessions_metadata_path": {"$ref": "#/$defs/absolutePath"},
         "include_channel_metadata": {"type": "boolean"},
         "include_session_metadata": {"type": "boolean"},
         "session_metadata_fields": {"type": "array", "items": {"type": "string", "minLength": 1}},
@@ -248,7 +249,7 @@
     },
     "output": {
       "type": "object", "additionalProperties": false,
-      "required": ["repository_root", "history_directory", "prompt_directory", "layout", "prompt_max_chars", "prompt_code_block_max_chars", "encryption_attributes", "compatibility"],
+      "required": ["repository_root", "history_directory", "layout", "prompt_max_chars", "prompt_code_block_max_chars", "encryption_attributes", "compatibility"],
       "properties": {
         "repository_root": {"$ref": "#/$defs/absolutePath"},
         "history_directory": {"$ref": "#/$defs/relativePath"},
@@ -257,7 +258,7 @@
           "propertyNames": {"enum": ["claude-code", "codex", "opencode", "dsh", "cursor", "openclaw"]},
           "additionalProperties": {"$ref": "#/$defs/relativePath"}
         },
-        "prompt_directory": {"$ref": "#/$defs/relativePath"},
+        "prompt_directory": {"anyOf": [{"$ref": "#/$defs/relativePath"}, {"type": "null"}]},
         "layout": {"enum": ["flat", "monthly"]},
         "filename_strategy": {"$ref": "#/$defs/filenameStrategy"},
         "filename_strategy_by_harness": {
@@ -269,11 +270,15 @@
         "prompt_code_block_max_chars": {"type": "integer", "minimum": 16},
         "encryption_attributes": {"type": "object", "additionalProperties": {"type": "string"}},
         "day_split": {"enum": ["off", "hybrid", "all"]},
+        "metadata_headers": {"type": "object", "additionalProperties": {"type": "string"}},
         "compatibility": {
           "type": "object", "additionalProperties": false, "required": ["rule_version", "unchanged_sha256"],
           "properties": {
             "rule_version": {"enum": ["none", "legacy-output/v1", "legacy-agent-markdown/v1", "legacy-agent-markdown-frozen/v1"]},
-            "unchanged_sha256": {"type": "array", "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+            "unchanged_sha256": {"type": "array", "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+            "legacy_openclaw_node": {"$ref": "#/$defs/label"},
+            "static_paths": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+            "static_patterns": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
           }
         }
       }
@@ -284,7 +289,8 @@
         "session-prefix-8",
         "session-last-component-prefix-8",
         "session-suffix-8",
-        "node-session-sha256-12"
+        "node-session-sha256-12",
+        "session-date-prefix-8"
       ]
     },
     "transforms": {
