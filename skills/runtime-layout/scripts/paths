@@ -1,0 +1,8 @@
+#!/usr/bin/env python3
+"""Resolve caller-selected runtime paths."""
+import sys
+sys.dont_write_bytecode = True
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
+from runtime_layout.cli import main
+raise SystemExit(main())
