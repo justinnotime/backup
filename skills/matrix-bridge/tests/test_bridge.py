@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import phone_bridge as bridge
+import matrix_bridge as bridge
 
 ROOT = Path(__file__).resolve().parents[1]
 USER = '@sender:example.invalid'
@@ -78,7 +78,7 @@ def server(tmp_path):
     auth = tmp_path / 'auth.hdr'
     auth.write_text('Authorization: ' + AUTH)
     config = tmp_path / 'config.json'
-    settings = {'schema': 'phone-bridge/v1', 'homeserver': f'http://127.0.0.1:{httpd.server_port}',
+    settings = {'schema': 'matrix-bridge/v1', 'homeserver': f'http://127.0.0.1:{httpd.server_port}',
                 'room_id': ROOM, 'user_id': USER, 'auth_file': 'auth.hdr',
                 'state_file': 'state/since', 'inbox_dir': 'downloads'}
     config.write_text(json.dumps(settings))
@@ -282,7 +282,7 @@ def test_redirect_does_not_forward_authorization(server, capsys):
 def test_home_paths_and_config_environment_follow_caller(server, monkeypatch):
     home = server.root / 'another user'
     monkeypatch.setenv('HOME', str(home))
-    monkeypatch.setenv('PHONE_BRIDGE_CONFIG', str(server.config))
+    monkeypatch.setenv('MATRIX_BRIDGE_CONFIG', str(server.config))
     server.settings.update(auth_file='~/auth.hdr', state_file='$HOME/state/since', inbox_dir='~/downloads')
     server.config.write_text(json.dumps(server.settings))
     cfg = bridge.Config.load()
@@ -290,6 +290,65 @@ def test_home_paths_and_config_environment_follow_caller(server, monkeypatch):
     assert cfg.state_file == home / 'state/since'
     assert cfg.inbox_dir == home / 'downloads'
     assert not home.exists()
+
+
+@pytest.mark.parametrize('schema', ['matrix-bridge/v1', 'phone-bridge/v1'])
+def test_schema_preserves_default_storage_and_pending_cursor(server, monkeypatch, schema):
+    monkeypatch.setenv('HOME', str(server.root))
+    server.settings['schema'] = schema
+    server.settings.pop('state_file')
+    server.settings.pop('inbox_dir')
+    server.config.write_text(json.dumps(server.settings))
+    name = schema.split('/')[0]
+    cursor = server.root / '.local/state' / name / 'since'
+    cursor.parent.mkdir(parents=True)
+    cursor.write_text('pending-transfers')
+    cfg = bridge.Config.load(server.config)
+    assert cfg.state_file == cursor
+    assert cfg.inbox_dir == server.root / '.cache' / name / 'inbox'
+    server.syncs = [batch()]
+    assert server.run('recv') == 0
+    call = next(c for c in server.calls if c['path'].endswith('/sync'))
+    assert call['query']['since'] == ['pending-transfers']
+    assert cursor.read_text() == 'next'
+
+
+def test_configuration_precedence_retains_legacy_installations(server, monkeypatch):
+    for key in ('MATRIX_BRIDGE_CONFIG', 'PHONE_BRIDGE_CONFIG'):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(server.root / 'config root'))
+    legacy = server.root / 'config root/phone-bridge/config.json'
+    current = legacy.parent.parent / 'matrix-bridge/config.json'
+    settings = {**server.settings, 'auth_file': str(server.root / 'auth.hdr')}
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text(json.dumps({**settings, 'room_id': '!legacy:example.invalid'}))
+    assert bridge.Config.load().room_id == '!legacy:example.invalid'
+    current.parent.mkdir()
+    current.write_text(json.dumps({**settings, 'room_id': '!current:example.invalid'}))
+    assert bridge.Config.load().room_id == '!current:example.invalid'
+    monkeypatch.setenv('PHONE_BRIDGE_CONFIG', str(legacy))
+    assert bridge.Config.load().room_id == '!legacy:example.invalid'
+    monkeypatch.setenv('MATRIX_BRIDGE_CONFIG', str(current))
+    assert bridge.Config.load().room_id == '!current:example.invalid'
+    assert bridge.Config.load(server.config).room_id == ROOM
+
+
+@pytest.mark.parametrize('broken_link', [False, True])
+def test_invalid_new_default_never_selects_legacy_destination(server, monkeypatch, broken_link):
+    for key in ('MATRIX_BRIDGE_CONFIG', 'PHONE_BRIDGE_CONFIG', 'XDG_CONFIG_HOME'):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv('HOME', str(server.root))
+    legacy = server.root / '.config/phone-bridge/config.json'
+    current = legacy.parent.parent / 'matrix-bridge/config.json'
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text(json.dumps({**server.settings, 'auth_file': str(server.root / 'auth.hdr')}))
+    current.parent.mkdir()
+    if broken_link:
+        current.symlink_to(server.root / 'missing')
+    else:
+        current.write_text('invalid configuration')
+    assert bridge.main('send', ['--text', 'must not send']) == 1
+    assert not server.calls
 
 
 @pytest.mark.parametrize('field,value', [('homeserver', 'http://example.invalid'), ('homeserver', 'https://user:password@example.invalid'),
@@ -322,7 +381,7 @@ def test_missing_or_invalid_auth_is_sanitized(server, capsys):
 
 
 def test_entrypoints_run_from_another_directory_without_sibling_packages(server):
-    env = {**os.environ, 'PHONE_BRIDGE_CONFIG': str(server.config)}
+    env = {**os.environ, 'MATRIX_BRIDGE_CONFIG': str(server.config)}
     for name in ('mx-send', 'mx-recv'):
         result = subprocess.run([str(ROOT / name), '--doctor'], cwd=server.root, env=env, capture_output=True, text=True)
         assert result.returncode == 0, result.stderr

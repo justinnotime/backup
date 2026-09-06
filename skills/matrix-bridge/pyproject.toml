@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "phone-bridge-skill"
+name = "matrix-bridge-skill"
 version = "0.1.0"
 description = "Caller-configured Matrix text and file transfer"
 requires-python = ">=3.10"
@@ -13,12 +13,12 @@ dependencies = []
 dev = ["pytest>=8,<10", "ruff>=0.16,<1"]
 
 [project.scripts]
-mx-send = "phone_bridge:send_main"
-mx-recv = "phone_bridge:recv_main"
+mx-send = "matrix_bridge:send_main"
+mx-recv = "matrix_bridge:recv_main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-py-modules = ["phone_bridge"]
+py-modules = ["matrix_bridge"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

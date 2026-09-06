@@ -55,14 +55,18 @@ class Config:
 
     @classmethod
     def load(cls, filename=None):
-        default = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "phone-bridge/config.json"
-        path = Path(filename or os.environ.get("PHONE_BRIDGE_CONFIG") or default).expanduser().resolve()
+        config_root = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+        default = config_root / "matrix-bridge/config.json"
+        if not os.path.lexists(default) and os.path.lexists(config_root / "phone-bridge/config.json"):
+            default = config_root / "phone-bridge/config.json"
+        path = Path(filename or os.environ.get("MATRIX_BRIDGE_CONFIG")
+                    or os.environ.get("PHONE_BRIDGE_CONFIG") or default).expanduser().resolve()
         try:
             value = json.loads(path.read_text())
         except (OSError, ValueError):
-            raise BridgeError("cannot read phone-bridge configuration; use --config or PHONE_BRIDGE_CONFIG") from None
-        if not isinstance(value, dict) or value.get("schema") != "phone-bridge/v1":
-            raise BridgeError("configuration requires schema phone-bridge/v1")
+            raise BridgeError("cannot read matrix-bridge configuration; use --config or MATRIX_BRIDGE_CONFIG") from None
+        if not isinstance(value, dict) or value.get("schema") not in ("matrix-bridge/v1", "phone-bridge/v1"):
+            raise BridgeError("configuration requires schema matrix-bridge/v1")
         fields = {"schema", "homeserver", "room_id", "user_id", "auth_file", "state_file", "inbox_dir", "max_file_bytes", "timeline_limit"}
         if value.keys() - fields:
             raise BridgeError("configuration contains unknown fields")
@@ -80,8 +84,9 @@ class Config:
         limit = value.get("timeline_limit", 100)
         if type(maximum) is not int or maximum <= 0 or type(limit) is not int or not 1 <= limit <= 1000:
             raise BridgeError("max_file_bytes must be positive; timeline_limit must be 1..1000")
-        state = path_value(value.get("state_file", "~/.local/state/phone-bridge/since"), path.parent)
-        inbox = path_value(value.get("inbox_dir", "~/.cache/phone-bridge/inbox"), path.parent)
+        storage_name = value["schema"].split("/")[0]
+        state = path_value(value.get("state_file", f"~/.local/state/{storage_name}/since"), path.parent)
+        inbox = path_value(value.get("inbox_dir", f"~/.cache/{storage_name}/inbox"), path.parent)
         auth = path_value(value.get("auth_file"), path.parent)
         if state.resolve() == auth.resolve():
             raise BridgeError("state_file and auth_file must be different")
@@ -94,7 +99,7 @@ def atomic_write(path, data):
         raise BridgeError("refusing to replace a symbolic link")
     temporary = None
     try:
-        with tempfile.NamedTemporaryFile(dir=path.parent, prefix=".phone-bridge-", delete=False) as handle:
+        with tempfile.NamedTemporaryFile(dir=path.parent, prefix=".matrix-bridge-", delete=False) as handle:
             temporary = Path(handle.name)
             handle.write(data)
         os.replace(temporary, path)
@@ -284,7 +289,7 @@ class Client:
 
 def main(kind, argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", help="private JSON configuration (or PHONE_BRIDGE_CONFIG)")
+    parser.add_argument("--config", help="private JSON configuration (or MATRIX_BRIDGE_CONFIG)")
     parser.add_argument("--doctor", action="store_true", help="read-only account and room verification")
     if kind == "send":
         modes = parser.add_mutually_exclusive_group()
