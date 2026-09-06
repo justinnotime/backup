@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, unquote, urlparse
-from urllib.request import Request
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 import yaml
 
@@ -227,12 +227,31 @@ def google_asset_url(url):
     if (
         parsed.scheme != "https"
         or not allowed
-        or parsed.username
-        or parsed.password
+        or parsed.username is not None
+        or parsed.password is not None
         or parsed.port not in {None, 443}
     ):
         raise ValueError("mirror-google-asset-url-invalid")
     return url
+
+
+class GoogleAssetRedirect(HTTPRedirectHandler):
+    """Validate every asset redirect and keep credentials on their original host."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        google_asset_url(newurl)
+        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+        # Allowed URLs are HTTPS on port 443, so only the host can change origin.
+        if urlparse(req.full_url).hostname != urlparse(newurl).hostname:
+            redirected.remove_header("Authorization")
+            redirected.remove_header("Cookie")
+        return redirected
+
+
+def open_google_asset_get(url, *, headers, timeout):
+    """Follow bounded, validated redirects only for explicitly selected asset GETs."""
+    request = Request(google_asset_url(url), headers=headers, method="GET")
+    return build_opener(GoogleAssetRedirect()).open(request, timeout=timeout)
 
 
 def fetch_export_authenticated(doc_id: str, mime: str) -> bytes | None:
@@ -253,11 +272,11 @@ def fetch_export_authenticated(doc_id: str, mime: str) -> bytes | None:
             link = ((metadata or {}).get("exportLinks") or {}).get(mime)
             if not link:
                 return None
-            request = Request(
-                google_asset_url(link),
+            with open_google_asset_get(
+                link,
                 headers={"Authorization": f"Bearer {token}", "User-Agent": BROWSER_UA},
-            )
-            with open_request(request, timeout=300) as response:
+                timeout=300,
+            ) as response:
                 return response.read()
         if error.code == 400 and mime == "text/markdown":
             return None
