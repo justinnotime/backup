@@ -63,6 +63,7 @@ reusing that name removes the redirect.
 | `skills/secret-lint/` | Credential exposure audit procedure with redacted reporting |
 | `skills/privacy-lint/` | Publication privacy review with optional private identifier patterns |
 | `skills/teams-send/` | Authorized Teams chat sending through caller-owned credentials or an external connector |
+| `skills/chat-mentions/` | Read-only Teams attention collection and a local reply-draft box |
 | `skills/chat-draft/` | Targeted chat reading and reply drafting through configured readers |
 | `skills/agent-session-extraction/src/agent_skills/sessions/` | Package-owned normalized-session runtime |
 | `skills/<name>/tests/` | Tests owned and runnable by that Skill |
@@ -204,6 +205,7 @@ or shared source directory. Run additional checks from the affected package:
 (cd skills/secret-lint && uv run --locked skills-ref validate "$PWD")
 (cd skills/privacy-lint && uv run --locked skills-ref validate "$PWD")
 (cd skills/teams-send && uv run --locked pytest tests)
+(cd skills/chat-mentions && uv run --locked pytest tests)
 (cd skills/chat-draft && uv run --locked skills-ref validate "$PWD")
 (cd skills/slack-archive && uv run --locked pytest tests)
 (cd skills/whatsapp-archive && uv run --locked pytest tests && npm ci --prefix bridge && npm test --prefix bridge)
