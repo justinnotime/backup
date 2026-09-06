@@ -50,6 +50,14 @@ jobs:
             kind: python
             python: "3.14"
             check: Python 3.14
+          - skill: genspark-archive
+            kind: python
+            python: "3.10"
+            check: Python 3.10
+          - skill: genspark-archive
+            kind: python
+            python: "3.14"
+            check: Python 3.14
           - skill: structure-lint
             kind: python
             python: "3.10"
@@ -289,6 +297,16 @@ jobs:
           sh -n scripts/fingerprint
           sh -n scripts/sync scripts/auth scripts/render scripts/compare-exports
           uv run --no-sync gdocs-sync --self-test
+      - name: Lint Genspark archive
+        if: matrix.skill == 'genspark-archive'
+        working-directory: ${{ runner.temp }}/skill-check/${{ matrix.skill }}
+        run: |
+          uv run --no-sync ruff check .
+          uv run --no-sync ruff format --check .
+          sh -n scripts/sync-emails scripts/sync-calendar scripts/sync-meetings
+          if [[ "${{ matrix.python }}" != "3.10" ]]; then
+            uv run --no-sync agentskills validate "$PWD"
+          fi
       - name: Lint chat mentions
         if: matrix.skill == 'chat-mentions'
         working-directory: ${{ runner.temp }}/skill-check/${{ matrix.skill }}

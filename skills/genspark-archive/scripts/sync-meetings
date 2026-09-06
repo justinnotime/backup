@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+export PYTHONPATH="$script_dir/../src${PYTHONPATH:+:$PYTHONPATH}"
+exec "${GENSPARK_ARCHIVE_PYTHON:-python3}" -B -m genspark_archive.meetings "$@"

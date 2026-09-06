@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "genspark-archive"
+version = "0.1.0"
+description = "Configured email, calendar and meeting Markdown archives through Genspark CLI"
+requires-python = ">=3.10"
+dependencies = ["html2text>=2024.2.26,<2027"]
+
+[project.scripts]
+genspark-sync-emails = "genspark_archive.emails:main"
+genspark-sync-calendar = "genspark_archive.calendar:main"
+genspark-sync-meetings = "genspark_archive.meetings:main"
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "ruff>=0.12,<1", "skills-ref>=0.1.0; python_version >= '3.11'"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/genspark_archive"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
