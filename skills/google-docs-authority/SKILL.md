@@ -1,6 +1,6 @@
 ---
 name: google-docs-authority
-description: Publish or republish a configured local source as a Google Doc, check document authority and online text drift, or regenerate a source-derived registry. Use when a user asks about tracked Google documents, publication, authoritative copies, or handoff. Requires caller-owned configuration and Google credentials; does not provide a mirror downloader or bidirectional merge.
+description: Mirror Google Docs with tabs and original-resolution images, publish configured local sources, obtain separate read/write credentials, render PDF pages, and compare exports or document authority. Includes the complete runtime; accounts, selected documents, paths and publication rules stay in caller-owned configuration. Does not perform bidirectional merging.
 ---
 
 # Google Docs authority
@@ -16,6 +16,20 @@ own dependencies with `uv sync --locked`; command wrappers use
 `GOOGLE_DOCS_AUTHORITY_PYTHON` or `python3`. Select an explicit private config
 with `--config`, `GOOGLE_DOCS_AUTHORITY_CONFIG`, or the default configuration
 path described in the reference.
+
+The package includes mirroring, authorization, rendering and export comparison;
+it does not depend on a personal repository's implementation. Mirror with
+`scripts/sync --config FILE --root /selected/worktree --state-file /private/staged-state.json`.
+Use the caller's transaction publisher when the output belongs in Git. See
+[mirror configuration](references/mirror.md) for incremental state, image
+preservation, redaction and failure behavior. `--doctor` checks local dependencies;
+`--dry-run` lists selected documents. Neither proves live document access.
+
+Use [authorization and inspection tools](references/tools.md) to obtain a
+user-authorized credential, render PDF pages, or compare native and HTML exports.
+Reading a document does not authorize publishing it, changing sharing, replacing
+credentials or altering the selected document list. An inaccessible selected
+document is an error; preserve its archive and identify the access issue.
 
 Read the registry and exact source `gdoc` metadata before acting. There is one
 authoritative side:

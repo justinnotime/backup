@@ -1,6 +1,6 @@
 # Configuration and runtime
 
-Requires Python 3.10+ and PyYAML. `uv sync --locked` installs dependencies into
+Requires Python 3.10+, PyYAML and Pillow. `uv sync --locked` installs dependencies into
 this package's environment; set `GOOGLE_DOCS_AUTHORITY_PYTHON` to its Python when
 calling the shell wrappers, or use `uv run --locked gdocs-publish` and the other
 installed commands. Markdown upload is native. Non-Markdown inputs use HTML
@@ -39,7 +39,14 @@ A write-token file is an existing OAuth authorized-user JSON object containing
 token in memory and never rewrites that file. The response must grant exactly
 `https://www.googleapis.com/auth/drive.file` or
 `https://www.googleapis.com/auth/drive`; read-only Drive scope is insufficient.
-Account setup and consent are external. `--token` selects an explicit alternative.
+Account setup uses the included, explicitly invoked `scripts/auth` command;
+see [authorization and inspection](tools.md). `--token` selects an explicit alternative.
+
+The same configuration supports [complete mirroring](mirror.md) through a
+`mirror` section and separate `read_token_file`. These fields are optional for
+publication-only use. `render.pdftoppm_command` optionally configures page
+rasterization. The package never chooses an account or source list on behalf of
+an unconfigured caller.
 
 Commands, from this package directory:
 
