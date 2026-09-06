@@ -24,6 +24,7 @@
 #   retire <agent-id>
 
 set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROFILE="$HERE/lib/fleet-profile.py"
