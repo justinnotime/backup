@@ -104,3 +104,10 @@ by the consumer; the example is not a bundled publisher. Locks, Git policy,
 credentials, and schedules remain private. The publisher's exit status reaches
 the scheduler unchanged. Configure the scheduler's interpreter/PATH for the
 installed package dependencies, just as for an ordinary `scripts/sync` run.
+
+## Portable home paths
+
+Use `~` for path settings and `{home}` inside `publish.command` arguments.
+The home comes from the running user's environment, without a shell. Keep
+repository paths relative to `base_dir` where possible. After moving a checkout,
+regenerate external scheduler/service definitions that captured absolute paths.

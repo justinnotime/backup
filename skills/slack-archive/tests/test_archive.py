@@ -419,3 +419,21 @@ def test_relative_cli_base_keeps_working_directory_semantics(archive, monkeypatc
     monkeypatch.chdir(caller)
     assert ar["run"]("--base-dir", "selected") == 0
     assert (selected / "state/slack.json").exists()
+
+
+def test_publication_home_placeholder_follows_caller(archive, monkeypatch):
+    ar = archive
+    home = ar['root'] / 'another user'
+    monkeypatch.setenv('HOME', str(home))
+    cfg = publish_config(ar)
+    record = ar['root'] / 'home-arguments.json'
+    publisher = ar['root'] / 'home-publisher.py'
+    publisher.write_text('import json,sys\nfrom pathlib import Path\nPath(sys.argv[1]).write_text(json.dumps(sys.argv[2:]))\n')
+    cfg['state_file'] = '~/state/slack.json'
+    cfg['publish']['command'] = [sys.executable, str(publisher), str(record), '{home}/locks/chat.lock', '--']
+    ar['config'].write_text(yaml.safe_dump(ar['settings']))
+    assert ar['run']('--publish') == 0
+    args = json.loads(record.read_text())
+    assert args[0] == str(home / 'locks/chat.lock')
+    assert str(home / 'state/slack.json') in args
+    assert not home.exists()

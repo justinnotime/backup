@@ -969,7 +969,7 @@ def configure(config_file, *, base_dir=None, output_dir=None, state_file=None,
         or not isinstance(v, str) or "\x00" in v for k, v in environment.items()
     ):
         raise ArchiveError("command_environment must map variable names to strings")
-    COMMAND_ENV = {**os.environ, **environment}
+    COMMAND_ENV = {**os.environ, **{key: os.path.expandvars(value) for key, value in environment.items()}}
 
     def path(value, label, required=True):
         if value is None and not required:
@@ -1598,7 +1598,7 @@ def publication_output():
 def cmd_publish(cfg):
     settings = publication_settings(cfg)
     relative = publication_output()
-    values = {"base_dir": str(BASE_DIR), "output_dir": str(relative),
+    values = {"home": str(Path.home()), "base_dir": str(BASE_DIR), "output_dir": str(relative),
               "state_dir": str(STATE_FILE.parent),
               "utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
     command = []

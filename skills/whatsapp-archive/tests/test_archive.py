@@ -270,3 +270,24 @@ def test_publish_rejects_incompatible_modes(fixture, option):
     options = [option] + (['Example'] if option == '--peek' else ['status'] if option == '--bridge' else [])
     with pytest.raises(SystemExit):
         run(cfg, '--publish', *options)
+
+
+def test_home_paths_node_environment_and_publisher_follow_caller(fixture, tmp_path, monkeypatch):
+    cfg, _, configure = fixture
+    home = tmp_path / 'another user'
+    monkeypatch.setenv('HOME', str(home))
+    settings = publisher()
+    settings['command'] = ['publisher', '--lock', '{home}/locks/chat.lock', '--']
+    configure(state_file='~/state/whatsapp.json', spool_dir='~/device', publish=settings,
+              bridge={'node': '~/tools/node'}, command_environment={'PATH': '$HOME/tools:/usr/bin'})
+    config = archive.configure(cfg)
+    command, environment = archive.bridge_command(config, 'status')
+    assert command[0] == str(home / 'tools/node')
+    assert environment['PATH'] == str(home / 'tools') + ':/usr/bin'
+    assert environment['WA_BRIDGE_DIR'] == str(home / 'device')
+    seen = []
+    monkeypatch.setattr(archive.subprocess, 'run', lambda argv, **kw: seen.append(argv) or subprocess.CompletedProcess(argv, 0))
+    assert run(cfg, '--publish') == 0
+    assert seen[0][2] == str(home / 'locks/chat.lock')
+    assert archive.STATE_FILE == home / 'state/whatsapp.json'
+    assert not home.exists()

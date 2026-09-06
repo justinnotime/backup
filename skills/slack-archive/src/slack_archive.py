@@ -407,7 +407,7 @@ def publication_output(base):
 def cmd_publish(cfg, config_path, base, token_dir):
     settings = publication_settings(cfg)
     relative = publication_output(base)
-    values = {"base_dir": str(base), "output_dir": str(relative),
+    values = {"home": str(Path.home()), "base_dir": str(base), "output_dir": str(relative),
               "state_dir": str(STATE_FILE.parent),
               "utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
     command = []
