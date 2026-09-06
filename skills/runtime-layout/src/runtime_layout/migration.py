@@ -241,8 +241,8 @@ class Migrator:
                         service = self.config["services"][name]
                         status = self.command(service["active"], check=False).returncode
                         if status == 0:
-                            self.command(service["stop"])
                             stopped.append(service)
+                            self.command(service["stop"])
                         elif status not in service.get("inactive_codes", [3]):
                             raise MigrationError("service status is unknown")
                     for relative in self.config.get("directories", []):

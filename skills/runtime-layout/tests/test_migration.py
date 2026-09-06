@@ -453,3 +453,38 @@ def test_worktree_repair_failure_keeps_complete_output_and_can_resume(migration,
         check=True,
     )
     assert "worktree " + str(runner.root / "worktree") in result.stdout
+
+
+def test_stop_side_effect_then_failure_still_restores_previously_active_service(
+    migration, monkeypatch
+):
+    base, config, runner = migration
+    source = base / "value"
+    source.write_text("data")
+    add_move(config, source, "{root}/state/value", service="daemon")
+    config["migration"]["services"] = {
+        "daemon": {"active": ["status"], "stop": ["stop"], "start": ["start"]}
+    }
+    active = True
+    calls = []
+
+    def command(argv, **kwargs):
+        nonlocal active
+        calls.append(argv[0])
+        if argv == ["status"]:
+            return subprocess.CompletedProcess(argv, 0 if active else 3, "", "")
+        if argv == ["stop"]:
+            active = False
+            raise MigrationError("synthetic stop completed but command failed")
+        if argv == ["start"]:
+            active = True
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(runner, "command", command)
+    with pytest.raises(MigrationError, match="stop completed"):
+        runner.apply()
+    assert active is True
+    assert calls == ["status", "stop", "start", "status"]
+    assert source.read_text() == "data"
+    assert not runner.root.exists()
