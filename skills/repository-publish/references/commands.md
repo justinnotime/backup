@@ -70,6 +70,49 @@ Private commands own repository-specific policy, not the generic Git engine.
 
 ## Existing worktrees and LFS verification
 
+The same entry prepares dedicated worktrees for callers whose generation runs
+span more than one invocation:
+
+```bash
+scripts/publish worktree prepare --repo /private/repository \
+  --worktree /private/task-worktree --task-branch task/messages
+scripts/publish worktree ahead --repo /private/task-worktree
+scripts/publish worktree changed --repo /private/task-worktree
+scripts/publish worktree committed --repo /private/task-worktree
+scripts/publish worktree fetch --repo /private/task-worktree
+scripts/publish worktree reset --repo /private/task-worktree --task-branch task/messages
+```
+
+`prepare` fetches the selected upstream and reuses the named linked worktree.
+It preserves dirty files and unpublished commits, including reattaching an
+unpublished branch after its checkout directory was removed. It refuses an
+existing unregistered destination, another repository, a different branch, or
+a destination inside the source checkout. It does not reset a branch already
+attached elsewhere. The caller owns task locking across its complete generation
+cycle and decides which destination directories are permitted.
+
+`reset` requires a clean linked worktree on the expected branch with no
+unpublished commits. It updates from the already-fetched upstream. `fetch`,
+`prepare`, `ahead`, `committed` and `reset` accept `--remote` and `--branch`,
+defaulting to `origin` and `main`. Path listings include both sides of renames;
+use `--null` for NUL-delimited paths, including filenames containing newlines.
+Without it, such names fail before any partial path list is printed.
+
+To run an explicit validation command against a historical revision in a
+temporary, complete checkout:
+
+```bash
+scripts/publish worktree run-at-ref --repo /private/repository \
+  --ref origin/main --scratch /private/cache/inspection \
+  -- /path/to/validator --mode baseline
+```
+
+The command runs with that checkout as its working directory and receives
+`REPOSITORY_PUBLISH_WORKTREE` and `REPOSITORY_PUBLISH_REPOSITORY`. Its stdout,
+stderr and exit status pass through. Temporary files and Git registration are
+removed on completion or command failure. This command does not commit or push;
+the explicitly selected external command remains responsible for its own effects.
+
 For a caller that owns a persistent task worktree and already created its commit:
 
 ```bash

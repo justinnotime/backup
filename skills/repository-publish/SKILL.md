@@ -10,6 +10,11 @@ command. It includes the writer isolation, locking, Git publication, progress
 staging and LFS download verification implementation. It needs Python 3.10 or
 newer and Git; repositories containing LFS pointers also need Git LFS.
 
+The bundled `scripts/publish worktree` commands also prepare and inspect
+persistent task worktrees, preserve unpublished branches after directory loss,
+and run explicit validators in temporary historical checkouts. See the
+[command contract](references/commands.md) before selecting those operations.
+
 The caller selects the repository, remote branch, writer command, owned paths
 and private state directory. Keep credentials, account selection and repository
 rules in private configuration. Existing authorization for the scheduled writer

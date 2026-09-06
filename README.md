@@ -67,7 +67,7 @@ reusing that name removes the redirect.
 | `skills/agent-bus/` | Messaging workflow for the public fleet runtime and caller-owned identity policy |
 | `skills/fleet-orchestrator/` | Standalone ORC engine, durable local/Matrix transport, terminal helpers, and configurable private policy |
 | `skills/genteam/` | Configurable channel and thread archives, cookie setup and authorized message sending |
-| `skills/repository-publish/` | Transactional Git publication, isolated writers, durable state, and verified LFS delivery |
+| `skills/repository-publish/` | Git worktree preparation, transactional publication, durable state, and verified LFS delivery |
 | `skills/google-docs-authority/` | Caller-configured document publication, authority registry and stable text comparison |
 | `skills/structure-lint/` | Runnable repository structure checks with caller-owned metadata, layout and reference rules |
 | `skills/chat-draft/` | Targeted chat reading and reply drafting through configured readers |

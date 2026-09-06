@@ -7,7 +7,7 @@ configured server means observations are UNKNOWN, not that every pane vanished.
 
 Precedence:
   1. NW_TMUX_SERVER environment override (tests and one-shot commands)
-  2. state/fleet-orchestrator/tmux-server under the notes runtime root
+  2. state/fleet-orchestrator/tmux-server under the configured runtime root
   3. default tmux server when neither is configured
 
 The config file is one trimmed tmux socket name, never command-line arguments.

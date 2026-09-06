@@ -280,6 +280,157 @@ def fetch(root: Path, remote: str, branch: str) -> str:
     return f"refs/remotes/{remote}/{branch}"
 
 
+def prepare_worktree(root: Path, target: Path, task_branch: str, remote: str, branch: str):
+    """Reuse a dedicated checkout without losing unpublished commits or dirty files."""
+    if target == root or root in target.parents:
+        raise Failure("dedicated worktree must be outside the source checkout")
+    git(root, "check-ref-format", "refs/heads/" + task_branch)
+    upstream = fetch(root, remote, branch)
+    git(root, "worktree", "prune")
+    entries = git(root, "worktree", "list", "--porcelain", "-z").stdout.split(b"\0")
+    registered = {
+        os.fsdecode(item[len(b"worktree ") :]) for item in entries if item.startswith(b"worktree ")
+    }
+    if str(target) not in registered:
+        if target.exists() or target.is_symlink():
+            raise Failure("unregistered worktree path already exists; refusing to remove it")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        existing = git(
+            root, "show-ref", "--verify", "--quiet", "refs/heads/" + task_branch, check=False
+        )
+        if existing.returncode not in {0, 1}:
+            raise Failure("cannot inspect dedicated worktree branch")
+        ahead = (
+            int(text(root, "rev-list", "--count", upstream + ".." + task_branch))
+            if existing.returncode == 0
+            else 0
+        )
+        if ahead:
+            git(root, "worktree", "add", str(target), task_branch)
+        else:
+            git(root, "worktree", "add", "-B", task_branch, str(target), upstream)
+    if not (target / ".git").is_file():
+        raise Failure("dedicated worktree is unavailable")
+    if absolute(target / text(target, "rev-parse", "--git-common-dir")) != absolute(
+        root / text(root, "rev-parse", "--git-common-dir")
+    ):
+        raise Failure("dedicated worktree belongs to another repository")
+    if text(target, "branch", "--show-current") != task_branch:
+        raise Failure("dedicated worktree is on an unexpected branch")
+
+
+def reset_worktree(root: Path, task_branch: str, upstream: str):
+    if not (root / ".git").is_file():
+        raise Failure("reset requires a linked worktree")
+    if text(root, "branch", "--show-current") != task_branch:
+        raise Failure("refusing to reset an unexpected branch")
+    if changed(root):
+        raise Failure("cannot reset a dirty dedicated worktree")
+    if text(root, "rev-list", "--count", upstream + "..HEAD") != "0":
+        raise Failure("cannot reset an unpublished commit")
+    git(root, "checkout", "--quiet", "-B", task_branch, upstream)
+    git(root, "reset", "--hard", "--quiet", upstream)
+
+
+def run_at_ref(root: Path, reference: str, scratch: Path, argv: list[str]) -> int:
+    if not argv:
+        raise Failure("a command after -- is required")
+    if scratch == root or root in scratch.parents:
+        raise Failure("temporary worktree storage must be outside the checkout")
+    if reference.startswith("-"):
+        raise Failure("reference cannot be an option")
+    revision = text(root, "rev-parse", "--verify", reference + "^{commit}")
+    scratch.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="inspect-", dir=scratch) as temporary:
+        target = Path(temporary) / "worktree"
+        git(root, "worktree", "add", "--detach", str(target), revision)
+        try:
+            env = dict(
+                os.environ,
+                REPOSITORY_PUBLISH_WORKTREE=str(target),
+                REPOSITORY_PUBLISH_REPOSITORY=str(root),
+            )
+            return subprocess.run(argv, cwd=target, env=env, check=False).returncode
+        finally:
+            git(root, "worktree", "remove", "--force", str(target))
+
+
+def worktree_main(argv: list[str]) -> int:
+    p = argparse.ArgumentParser(description="Prepare, inspect or reset caller-owned Git worktrees")
+    p.add_argument(
+        "action",
+        choices=["prepare", "fetch", "changed", "committed", "ahead", "reset", "run-at-ref"],
+    )
+    p.add_argument("--repo", default=".")
+    p.add_argument("--worktree")
+    p.add_argument("--task-branch")
+    p.add_argument("--remote", default="origin")
+    p.add_argument("--branch", default="main")
+    p.add_argument("--ref", default="HEAD")
+    p.add_argument(
+        "--scratch",
+        default=str(
+            Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+            / "repository-publish/inspections"
+        ),
+    )
+    p.add_argument("--null", action="store_true", help="NUL-separated path output")
+    if "--" in argv:
+        split = argv.index("--")
+        arguments, command_argv = argv[:split], argv[split + 1 :]
+    else:
+        arguments, command_argv = argv, []
+    args = p.parse_args(arguments)
+    try:
+        root = absolute(args.repo)
+        if not (root / ".git").exists():
+            raise Failure("repository must be a Git checkout")
+        if args.remote.startswith("-") or args.branch.startswith("-"):
+            raise Failure("remote and branch cannot be options")
+        git(root, "check-ref-format", "refs/heads/" + args.branch)
+        upstream = f"refs/remotes/{args.remote}/{args.branch}"
+        if args.action in {"prepare", "reset"} and not args.task_branch:
+            raise Failure("--task-branch is required")
+        if args.task_branch and args.task_branch.startswith("-"):
+            raise Failure("task branch cannot be an option")
+        if command_argv and args.action != "run-at-ref":
+            raise Failure("only run-at-ref accepts an external command")
+        if args.action == "prepare":
+            if not args.worktree:
+                raise Failure("--worktree is required")
+            prepare_worktree(
+                root, absolute(args.worktree), args.task_branch, args.remote, args.branch
+            )
+        elif args.action == "fetch":
+            fetch(root, args.remote, args.branch)
+        elif args.action == "reset":
+            reset_worktree(root, args.task_branch, upstream)
+        elif args.action == "ahead":
+            print(text(root, "rev-list", "--count", upstream + "..HEAD"))
+        elif args.action == "run-at-ref":
+            return run_at_ref(root, args.ref, absolute(args.scratch), command_argv)
+        else:
+            names = (
+                [name for _, name in changed(root)]
+                if args.action == "changed"
+                else [
+                    os.fsdecode(name)
+                    for name in git(
+                        root, "diff", "--name-only", "--no-renames", "-z", upstream + "..HEAD"
+                    ).stdout.split(b"\0")
+                    if name
+                ]
+            )
+            if not args.null and any("\n" in name or "\r" in name for name in names):
+                raise Failure("line-based path output cannot represent newlines; use --null")
+            delimiter = b"\0" if args.null else b"\n"
+            sys.stdout.buffer.write(b"".join(os.fsencode(name) + delimiter for name in names))
+        return 0
+    except (Failure, OSError, ValueError) as exc:
+        print(f"FAIL: {exc}", file=sys.stderr)
+        return 1
+
+
 def push_existing(
     root: Path,
     args,
@@ -524,6 +675,9 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] == ["worktree"]:
+        return worktree_main(argv[1:])
     args = parser().parse_args(argv)
     try:
         prepare_args(args)
