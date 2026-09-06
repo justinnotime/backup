@@ -42,9 +42,13 @@ fails the run so synchronization state is not advanced past missing content.
 
 Incomplete listings or message pages return nonzero without saving new sync
 state. Earlier files from a failed run may remain; retrying deduplicates them.
-Consumers publishing to Git should run in their own transaction worktree and
-promote the separately staged state only after publication succeeds. This
-package does not schedule jobs, commit, push, or manage another repository.
+For scheduled publication, configure `teams.publish` and call
+`scripts/sync --config /path/to/private/config.yaml --publish`. The configured
+external command creates the transaction worktree, runs the appended reader,
+and promotes staged progress after successful publication. The package keeps
+credentials and chat metadata at their original locations. It supplies no
+scheduler or Git implementation. See the configuration reference for the
+publisher contract and external-command environment.
 
 Validate changes with `uv run --locked pytest tests`. Tests use synthetic inputs
 and require neither real credentials nor neighboring Skill packages.

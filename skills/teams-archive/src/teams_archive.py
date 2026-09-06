@@ -19,7 +19,9 @@ from pathlib import Path
 OUTPUT_DIR = Path()
 STATE_FILE = Path()
 CONFIG_FILE = Path()
+BASE_DIR = Path()
 REGISTRY_FILE = None
+COMMAND_ENV = None
 DRY_RUN = False
 GSK_COMMAND = "gsk"
 RELAY_DIR = "/teams-archive"
@@ -54,7 +56,7 @@ def run_gsk(args: list[str], timeout=120) -> dict | None:
     """Run a gsk command, return parsed JSON envelope, or None on failure."""
     cmd = [GSK_COMMAND] + args
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=COMMAND_ENV)
     except subprocess.TimeoutExpired:
         warn(f"gsk timed out: {' '.join(args[:3])}")
         return None
@@ -755,7 +757,7 @@ class AttachmentStore:
         import subprocess
         last = ""
         for attempt in range(tries):
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=COMMAND_ENV)
             res = check(self._jenv(r.stdout), r.stdout)
             if res is not None:
                 return res
@@ -771,7 +773,7 @@ class AttachmentStore:
         if not self._dir_ready:
             import subprocess
             subprocess.run([GSK_COMMAND, "aidrive", "mkdir", "-p", RELAY_DIR],
-                           capture_output=True, text=True, timeout=60)
+                           capture_output=True, text=True, timeout=60, env=COMMAND_ENV)
             self._dir_ready = True
 
     def _download(self, key, message_id, hosted_id=None, att_id=None, name=""):
@@ -820,7 +822,7 @@ class AttachmentStore:
             blob = urllib.request.urlopen(_req, timeout=120).read()
         finally:
             subprocess.run([GSK_COMMAND, "aidrive", "rm", "-p", f"{RELAY_DIR}/{tmp_name}"],
-                           capture_output=True, text=True, timeout=60)
+                           capture_output=True, text=True, timeout=60, env=COMMAND_ENV)
         sha = _h.sha1(blob).hexdigest()
         suffix = Path(name).suffix
         ext = _EXT.get(data.get("content_type"), suffix if re.fullmatch(r"\.[A-Za-z0-9]{1,10}", suffix) else ".bin")
@@ -878,7 +880,7 @@ class AttachmentStore:
 
 def gsk_available():
     import shutil as _sh
-    return _sh.which(GSK_COMMAND) is not None
+    return _sh.which(GSK_COMMAND, path=(COMMAND_ENV or os.environ).get("PATH")) is not None
 
 
 def normalize_ts(raw: str) -> str:
@@ -945,7 +947,7 @@ def configure(config_file, *, base_dir=None, output_dir=None, state_file=None,
               dry_run=False):
     """Load caller settings. Performs no writes and requires no sibling package."""
     import yaml
-    global CONFIG_FILE, OUTPUT_DIR, STATE_FILE, REGISTRY_FILE, GRAPH_CFG, BACKEND
+    global CONFIG_FILE, BASE_DIR, OUTPUT_DIR, STATE_FILE, REGISTRY_FILE, GRAPH_CFG, BACKEND, COMMAND_ENV
     global ATTACHMENTS_ENABLED, DRY_RUN, GSK_COMMAND, RELAY_DIR
     CONFIG_FILE = Path(config_file).expanduser().resolve()
     try:
@@ -955,7 +957,19 @@ def configure(config_file, *, base_dir=None, output_dir=None, state_file=None,
     if not isinstance(document, dict) or not isinstance(document.get("teams"), dict):
         raise ArchiveError("configuration requires a teams mapping")
     cfg = validate_selection(dict(document["teams"]), "teams")
-    base = Path(base_dir).expanduser().resolve() if base_dir else CONFIG_FILE.parent
+    if base_dir:
+        base = Path(base_dir).expanduser().resolve()
+    else:
+        base = Path(cfg.get("base_dir", ".")).expanduser()
+        base = (CONFIG_FILE.parent / base).resolve()
+    BASE_DIR = base
+    environment = cfg.get("command_environment", {})
+    if not isinstance(environment, dict) or any(
+        not isinstance(k, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", k)
+        or not isinstance(v, str) or "\x00" in v for k, v in environment.items()
+    ):
+        raise ArchiveError("command_environment must map variable names to strings")
+    COMMAND_ENV = {**os.environ, **environment}
 
     def path(value, label, required=True):
         if value is None and not required:
@@ -1554,8 +1568,59 @@ def cmd_backfill_attachments(cfg: dict, days: int):
     log(f"teams backfill: {tot_new} appended, {tot_patched} patched, {tot_dl} attachments downloaded")
 
 
+def publication_settings(cfg):
+    settings = cfg.get("publish")
+    if not isinstance(settings, dict):
+        raise ArchiveError("publish configuration is required")
+    command = settings.get("command")
+    if not isinstance(command, list) or not command or any(
+        not isinstance(value, str) or not value or "\x00" in value for value in command
+    ):
+        raise ArchiveError("publish.command must be a nonempty argument array")
+    for key in ("base_env", "state_env"):
+        if not isinstance(settings.get(key), str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", settings[key]):
+            raise ArchiveError("publish requires base_env and state_env variable names")
+    if settings["base_env"] == settings["state_env"]:
+        raise ArchiveError("publication worktree and state variables must differ")
+    return settings
+
+
+def publication_output():
+    try:
+        relative = OUTPUT_DIR.relative_to(BASE_DIR)
+    except ValueError:
+        raise ArchiveError("publication output must be inside base_dir") from None
+    if relative == Path("."):
+        raise ArchiveError("publication output must be a subdirectory of base_dir")
+    return relative
+
+
+def cmd_publish(cfg):
+    settings = publication_settings(cfg)
+    relative = publication_output()
+    values = {"base_dir": str(BASE_DIR), "output_dir": str(relative),
+              "state_dir": str(STATE_FILE.parent),
+              "utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    command = []
+    for argument in settings["command"]:
+        for key, value in values.items():
+            argument = argument.replace("{" + key + "}", value)
+        command.append(argument)
+    command += [sys.executable, "-B", str(Path(__file__).resolve()),
+                "--config", str(CONFIG_FILE), "--base-dir", str(BASE_DIR),
+                "--output-dir", str(OUTPUT_DIR), "--state-file", str(STATE_FILE),
+                "--backend", BACKEND, "--transaction-writer"]
+    # Credentials and metadata stay at their original resolved locations.
+    if REGISTRY_FILE:
+        command += ["--registry-file", str(REGISTRY_FILE)]
+    for key in ("token_cache", "client_id"):
+        if GRAPH_CFG.get(key):
+            command += ["--" + key.replace("_", "-"), GRAPH_CFG[key]]
+    return subprocess.run(command, env=COMMAND_ENV, check=False).returncode
+
+
 def main(argv=None):
-    global DUMP_RAW
+    global DUMP_RAW, OUTPUT_DIR, STATE_FILE
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
     parser.add_argument("--base-dir")
@@ -1569,6 +1634,8 @@ def main(argv=None):
     modes.add_argument("--peek", metavar="MATCH")
     modes.add_argument("--login", action="store_true")
     modes.add_argument("--backfill-attachments", type=int, metavar="DAYS")
+    modes.add_argument("--publish", action="store_true", help="run the configured external publisher")
+    modes.add_argument("--transaction-writer", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--peek-limit", type=int, default=30)
     parser.add_argument("--backend", choices=["gsk", "graph"])
     parser.add_argument("--dump-raw", action="store_true")
@@ -1579,12 +1646,27 @@ def main(argv=None):
         parser.error("limits must be positive")
     if args.dry_run and args.login:
         parser.error("--login cannot be combined with --dry-run")
+    if (args.publish or args.transaction_writer) and (args.dry_run or args.dump_raw):
+        parser.error("publication cannot be combined with --dry-run or --dump-raw")
     try:
         cfg = configure(args.config, base_dir=args.base_dir, output_dir=args.output_dir,
                         state_file=args.state_file, registry_file=args.registry_file,
                         token_cache=args.token_cache, client_id=args.client_id,
                         backend=args.backend, dry_run=args.dry_run)
         DUMP_RAW = args.dump_raw
+        if args.publish:
+            return cmd_publish(cfg)
+        if args.transaction_writer:
+            settings = publication_settings(cfg)
+            relative = publication_output()
+            output = Path(os.environ.get(settings["base_env"], ""))
+            staged = Path(os.environ.get(settings["state_env"], ""))
+            if not output.is_absolute() or not staged.is_absolute():
+                raise ArchiveError("publisher must provide absolute worktree and staged-state paths")
+            if output.resolve() == BASE_DIR or staged.resolve() == STATE_FILE.parent:
+                raise ArchiveError("publisher must isolate archive and synchronization state")
+            OUTPUT_DIR = output / relative
+            STATE_FILE = staged / STATE_FILE.name
         if args.login:
             if BACKEND != "graph":
                 raise ArchiveError("--login requires the Graph backend")
