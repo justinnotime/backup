@@ -1,6 +1,7 @@
 """Explicit private configuration and atomic local record writes."""
 
 import json
+import math
 import os
 import re
 import tempfile
@@ -33,7 +34,16 @@ def load(path, root_override=None):
     if (
         not isinstance(value, dict)
         or value.get("schema") != "google-docs-authority/v1"
-        or set(value) - {"schema", "write_token_file", "pageless", "registry"}
+        or set(value)
+        - {
+            "schema",
+            "read_token_file",
+            "write_token_file",
+            "pageless",
+            "registry",
+            "mirror",
+            "render",
+        }
     ):
         raise ValueError("config-schema-invalid")
 
@@ -48,6 +58,8 @@ def load(path, root_override=None):
 
     if value.get("write_token_file"):
         value["write_token_file"] = resolve(value["write_token_file"])
+    if value.get("read_token_file"):
+        value["read_token_file"] = resolve(value["read_token_file"])
     value.setdefault("pageless", False)
     if type(value["pageless"]) is not bool:
         raise ValueError("config-pageless-invalid")
@@ -96,4 +108,120 @@ def load(path, root_override=None):
             *registry["source_lists"].values(),
         }:
             raise ValueError("config-output-must-be-distinct")
+
+    def command(argv):
+        if (
+            not isinstance(argv, list)
+            or not argv
+            or any(not isinstance(arg, str) or not arg for arg in argv)
+        ):
+            raise ValueError("config-command-invalid")
+        result = [os.path.expandvars(os.path.expanduser(arg)) for arg in argv]
+        if any(re.search(r"\$(?:\w+|\{[^}]+\})", arg) for arg in result):
+            raise ValueError("config-command-variable-unresolved")
+        return result
+
+    if "mirror" in value:
+        mirror = value["mirror"]
+        allowed = {
+            "repository_root",
+            "output_directory",
+            "source_list",
+            "discovered_list",
+            "state_file",
+            "cache_directory",
+            "cache_link",
+            "engine",
+            "allow_unauthenticated",
+            "redact_command",
+            "redact_enabled",
+            "mask_tiers",
+            "image_shrink_floor",
+            "allow_image_shrink",
+            "allow_no_pillow",
+            "pandoc_command",
+            "pandoc_memory_max",
+            "pandoc_timeout",
+            "readme_header",
+        }
+        if not isinstance(mirror, dict) or set(mirror) - allowed:
+            raise ValueError("config-mirror-invalid")
+        root = resolve(root_override or mirror.get("repository_root"))
+        if not root.is_dir():
+            raise ValueError("config-repository-root-missing")
+        mirror["repository_root"] = root
+        for key in ("output_directory", "source_list", "discovered_list", "cache_link"):
+            if key not in mirror and key in {"discovered_list", "cache_link"}:
+                continue
+            if key == "cache_link":
+                raw = mirror[key]
+                if not isinstance(raw, str) or not raw:
+                    raise ValueError("config-path-required")
+                expanded = Path(os.path.expandvars(raw)).expanduser()
+                if re.search(r"\$(?:\w+|\{[^}]+\})", str(expanded)):
+                    raise ValueError("config-path-variable-unresolved")
+                target = expanded if expanded.is_absolute() else root / expanded
+                target = target.parent.resolve() / target.name
+            else:
+                target = resolve(mirror.get(key), root)
+            if target == root or not target.is_relative_to(root):
+                raise ValueError("config-mirror-path-outside-repository")
+            mirror[key] = target
+        for key in ("state_file", "cache_directory"):
+            target = resolve(mirror.get(key))
+            if target == root or target.is_relative_to(root):
+                raise ValueError("config-mirror-runtime-path-inside-repository")
+            mirror[key] = target
+        if mirror["state_file"] in {
+            path,
+            value.get("read_token_file"),
+            value.get("write_token_file"),
+        }:
+            raise ValueError("config-output-must-be-distinct")
+        for key, default in (
+            ("allow_unauthenticated", False),
+            ("redact_enabled", True),
+            ("allow_image_shrink", False),
+            ("allow_no_pillow", False),
+        ):
+            mirror.setdefault(key, default)
+            if type(mirror[key]) is not bool:
+                raise ValueError("config-mirror-boolean-invalid")
+        mirror.setdefault("engine", "markdown")
+        if mirror["engine"] not in {"markdown", "html"}:
+            raise ValueError("config-mirror-engine-invalid")
+        mirror.setdefault("mask_tiers", ["hard", "ctx"])
+        if (
+            not isinstance(mirror["mask_tiers"], list)
+            or not mirror["mask_tiers"]
+            or any(tier not in {"hard", "ctx", "heur"} for tier in mirror["mask_tiers"])
+        ):
+            raise ValueError("config-mirror-mask-tiers-invalid")
+        if mirror["redact_enabled"] or "redact_command" in mirror:
+            mirror["redact_command"] = command(mirror.get("redact_command"))
+        mirror["pandoc_command"] = command(mirror.get("pandoc_command", ["pandoc"]))
+        mirror.setdefault("image_shrink_floor", 0.7)
+        floor = mirror["image_shrink_floor"]
+        if (
+            type(floor) not in {int, float}
+            or not math.isfinite(floor)
+            or not 0 < floor <= 1
+        ):
+            raise ValueError("config-mirror-image-floor-invalid")
+        mirror.setdefault("pandoc_timeout", 300)
+        if type(mirror["pandoc_timeout"]) is not int or mirror["pandoc_timeout"] <= 0:
+            raise ValueError("config-mirror-timeout-invalid")
+        if mirror.get("pandoc_memory_max") is not None and not re.fullmatch(
+            r"[1-9][0-9]*[KMGT]?", str(mirror["pandoc_memory_max"])
+        ):
+            raise ValueError("config-mirror-memory-limit-invalid")
+        if "readme_header" in mirror and not isinstance(mirror["readme_header"], str):
+            raise ValueError("config-mirror-header-invalid")
+    if "render" in value:
+        render = value["render"]
+        if not isinstance(render, dict) or set(render) - {"pdftoppm_command"}:
+            raise ValueError("config-render-invalid")
+        render["pdftoppm_command"] = command(
+            render.get("pdftoppm_command", ["pdftoppm"])
+        )
     return value

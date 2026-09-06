@@ -209,13 +209,14 @@ jobs:
           python-version: ${{ matrix.python }}
           enable-cache: false
       - name: Install test command dependencies
-        if: matrix.kind == 'shell' || matrix.skill == 'agent-session-extraction' || matrix.skill == 'happy-tmux-title' || matrix.skill == 'fleet-orchestrator' || matrix.skill == 'repository-publish'
+        if: matrix.kind == 'shell' || matrix.skill == 'agent-session-extraction' || matrix.skill == 'happy-tmux-title' || matrix.skill == 'fleet-orchestrator' || matrix.skill == 'repository-publish' || matrix.skill == 'google-docs-authority'
         run: |
           case "$SKILL" in
             agent-session-extraction) packages=(git-crypt) ;;
             happy-tmux-title) packages=(tmux) ;;
             fleet-orchestrator) packages=(tmux jq iproute2 nodejs) ;;
             repository-publish) packages=(git-lfs) ;;
+            google-docs-authority) packages=(pandoc poppler-utils git-lfs) ;;
             state-backup|agent-harness-profiles) packages=(rsync sqlite3) ;;
           esac
           sudo apt-get update -qq
@@ -286,6 +287,8 @@ jobs:
           sh -n scripts/publish
           sh -n scripts/registry
           sh -n scripts/fingerprint
+          sh -n scripts/sync scripts/auth scripts/render scripts/compare-exports
+          uv run --no-sync gdocs-sync --self-test
       - name: Lint chat mentions
         if: matrix.skill == 'chat-mentions'
         working-directory: ${{ runner.temp }}/skill-check/${{ matrix.skill }}

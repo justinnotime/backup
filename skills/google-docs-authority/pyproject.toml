@@ -5,9 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "google-docs-authority-skill"
 version = "0.1.0"
-description = "Caller-configured Google document publication and authority tracking"
+description = "Caller-configured Google document mirroring, publication, authorization and inspection"
 requires-python = ">=3.10"
-dependencies = ["PyYAML>=6,<7"]
+dependencies = ["PyYAML>=6,<7", "Pillow>=10,<13"]
 
 [dependency-groups]
 dev = ["pytest>=8,<10", "ruff>=0.16,<1"]
@@ -16,6 +16,10 @@ dev = ["pytest>=8,<10", "ruff>=0.16,<1"]
 gdocs-publish = "google_docs_authority.publisher:main"
 gdocs-registry = "google_docs_authority.registry:main"
 gdocs-fingerprint = "google_docs_authority.fingerprint:main"
+gdocs-sync = "google_docs_authority.mirror:main"
+gdocs-auth = "google_docs_authority.auth:main"
+gdocs-render = "google_docs_authority.render:main"
+gdocs-compare-exports = "google_docs_authority.export_compare:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

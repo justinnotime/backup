@@ -68,7 +68,7 @@ reusing that name removes the redirect.
 | `skills/fleet-orchestrator/` | Standalone ORC engine, durable local/Matrix transport, terminal helpers, and configurable private policy |
 | `skills/genteam/` | Configurable channel and thread archives, cookie setup and authorized message sending |
 | `skills/repository-publish/` | Git worktree preparation, transactional publication, durable state, and verified LFS delivery |
-| `skills/google-docs-authority/` | Caller-configured document publication, authority registry and stable text comparison |
+| `skills/google-docs-authority/` | Complete document mirroring, authorization, publication, page rendering and authority/export comparison |
 | `skills/structure-lint/` | Runnable repository structure checks with caller-owned metadata, layout and reference rules |
 | `skills/chat-draft/` | Targeted chat reading and reply drafting through configured readers |
 | `skills/agent-session-extraction/src/agent_skills/sessions/` | Package-owned normalized-session runtime |
