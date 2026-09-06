@@ -51,6 +51,7 @@ reusing that name removes the redirect.
 | `skills/agent-session-extraction/` | Manifest-driven extraction Skill and command wrappers |
 | `skills/github-archive/` | Caller-configured GitHub issue, pull-request, and comment archive |
 | `skills/teams-archive/` | Caller-configured Teams chat, card, and attachment archive |
+| `skills/slack-archive/` | Caller-configured Slack conversation archive, including late thread replies |
 | `skills/agent-session-extraction/src/agent_skills/sessions/` | Package-owned normalized-session runtime |
 | `skills/<name>/tests/` | Tests owned and runnable by that Skill |
 
@@ -181,6 +182,7 @@ or shared source directory. Run additional checks from the affected package:
 (cd skills/agent-session-extraction && uv sync --locked --extra test && uv run --no-sync pytest tests)
 (cd skills/github-archive && uv run --locked pytest tests)
 (cd skills/teams-archive && uv run --locked pytest tests)
+(cd skills/slack-archive && uv run --locked pytest tests)
 ```
 
 Consumers of the session Python API configure the runtime root as
