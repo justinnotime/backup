@@ -69,6 +69,7 @@ reusing that name removes the redirect.
 | `skills/genteam/` | Configurable channel and thread archives, cookie setup and authorized message sending |
 | `skills/repository-publish/` | Git worktree preparation, transactional publication, durable state, and verified LFS delivery |
 | `skills/google-docs-authority/` | Complete document mirroring, authorization, publication, page rendering and authority/export comparison |
+| `skills/genspark-archive/` | Configured Outlook email, calendar and meeting archives through the Genspark CLI |
 | `skills/structure-lint/` | Runnable repository structure checks with caller-owned metadata, layout and reference rules |
 | `skills/chat-draft/` | Targeted chat reading and reply drafting through configured readers |
 | `skills/agent-session-extraction/src/agent_skills/sessions/` | Package-owned normalized-session runtime |
@@ -217,6 +218,7 @@ or shared source directory. Run additional checks from the affected package:
 (cd skills/repository-publish && uv run --locked pytest tests -q)
 (cd skills/genteam && uv run --locked pytest tests)
 (cd skills/google-docs-authority && uv run --locked pytest tests)
+(cd skills/genspark-archive && uv run --locked pytest tests)
 (cd skills/structure-lint && uv run --locked pytest tests)
 (cd skills/chat-draft && uv run --locked skills-ref validate "$PWD")
 (cd skills/slack-archive && uv run --locked pytest tests)
