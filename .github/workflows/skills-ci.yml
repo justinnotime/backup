@@ -90,6 +90,30 @@ jobs:
             kind: python
             python: "3.14"
             check: Python 3.14
+          - skill: runtime-install
+            kind: python
+            python: "3.10"
+            check: Python 3.10
+          - skill: runtime-install
+            kind: python
+            python: "3.14"
+            check: Python 3.14
+          - skill: runtime-layout
+            kind: python
+            python: "3.10"
+            check: Python 3.10
+          - skill: runtime-layout
+            kind: python
+            python: "3.14"
+            check: Python 3.14
+          - skill: workspace-brief
+            kind: python
+            python: "3.10"
+            check: Python 3.10
+          - skill: workspace-brief
+            kind: python
+            python: "3.14"
+            check: Python 3.14
           - skill: structure-lint
             kind: python
             python: "3.10"
@@ -318,6 +342,14 @@ jobs:
           uv run --no-sync ruff check src tests --select E9,F63,F7,F82
           uv run --no-sync ruff check tests/test_publication.py --select E4,E7,E9,F
           bash -n scripts/sync
+      - name: Check configured local runtime tools
+        if: matrix.skill == 'runtime-install' || matrix.skill == 'runtime-layout' || matrix.skill == 'workspace-brief'
+        working-directory: ${{ runner.temp }}/skill-check/${{ matrix.skill }}
+        run: |
+          uv run --no-sync ruff check src tests
+          if [[ "${{ matrix.python }}" != "3.10" ]]; then
+            uv run --no-sync skills-ref validate "$PWD"
+          fi
       - name: Lint Google Docs authority
         if: matrix.skill == 'google-docs-authority'
         working-directory: ${{ runner.temp }}/skill-check/${{ matrix.skill }}
