@@ -1,0 +1,16 @@
+teams:
+  backend: graph
+  output_dir: /absolute/path/to/private/archive
+  state_file: /absolute/path/to/private/state/teams.json
+  registry_file: /absolute/path/to/private/state/chats.json
+  graph:
+    client_id: YOUR_PUBLIC_CLIENT_ID
+    tenant: organizations
+    token_cache: /absolute/path/to/private/credentials/graph.json
+  mode: whitelist
+  chats:
+    - match: Example project
+      alias: example-project
+  bootstrap_days: 14
+  max_pages_per_chat: 200
+  attachments: false

@@ -22,6 +22,14 @@ jobs:
             kind: python
             python: "3.14"
             check: Python 3.14
+          - skill: teams-archive
+            kind: python
+            python: "3.10"
+            check: Python 3.10
+          - skill: teams-archive
+            kind: python
+            python: "3.14"
+            check: Python 3.14
           - skill: agent-session-extraction
             kind: python
             python: "3.11"
@@ -65,7 +73,7 @@ jobs:
           python-version: ${{ matrix.python }}
           enable-cache: false
       - name: Install test command dependencies
-        if: matrix.kind != 'syntax' && matrix.skill != 'github-archive'
+        if: matrix.kind == 'shell' || matrix.skill == 'agent-session-extraction'
         run: |
           case "$SKILL" in
             agent-session-extraction) packages=(git-crypt) ;;

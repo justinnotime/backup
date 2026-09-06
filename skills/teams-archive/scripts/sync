@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+SKILL_ROOT=$(cd -P "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+PYTHON=${TEAMS_ARCHIVE_PYTHON:-"$SKILL_ROOT/.venv/bin/python"}
+if [[ ! -x "$PYTHON" ]]; then
+  PYTHON=python3
+fi
+exec "$PYTHON" "$SKILL_ROOT/src/teams_archive.py" "$@"
