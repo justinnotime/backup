@@ -84,6 +84,7 @@ GHSTUB
   chmod +x "$1/bin/gh-inert.sh"
   cp "$(command -v bash)" "$1/bin/codex"
   cat >"$1/bin/agent-loop.sh" <<'STUB'
+pending=""
 while true; do
   state="$(cat "$FAKE_CTL" 2>/dev/null || echo idle)"
   case "$state" in
@@ -91,9 +92,15 @@ while true; do
     busy)  echo "Working (1m 10s - Esc to interrupt)" ;;
     clear) printf '\033[2J\033[H' ;;
   esac
+  line=""
   if IFS= read -t 2 -r line; then
-    printf '%s\n' "$line" >>"$FAKE_LOG"
+    printf '%s%s\n' "$pending" "$line" >>"$FAKE_LOG"
+    pending=""
     echo ">"
+  else
+    # A timed-out read still consumes its partial input. Keep that fragment
+    # until the sender's newline arrives instead of dropping a message prefix.
+    pending+="$line"
   fi
 done
 STUB
@@ -175,7 +182,8 @@ cmd_e2e() {
   grep -qF "orc show $node1" "$LOG1" || fail "continuation reminder did not name the owed task and inspection command"
   grep -qF "orc show $node2" "$LOG1" || fail "one reminder did not cover the second task on the same seat"
   [ "$(grep -cF 'ORC reminder:' "$LOG1")" -eq 1 ] || fail "continuation reminder fired more than once in one tick"
-  [ "$(grep -cF '[agent-tmux-send from ' "$LOG1")" -eq 1 ] || fail "two tasks caused more than one peer-message submission"
+  peer_submissions="$(grep -cF '[agent-tmux-send from ' "$LOG1" || true)"
+  [ "$peer_submissions" -eq 1 ] || fail "expected one peer-message submission, recorded $peer_submissions"
   [ "$(grep -cF "orc show $node1" "$LOG1")" -eq 1 ] || fail "first task appeared more than once in the reminder"
   [ "$(grep -cF "orc show $node2" "$LOG1")" -eq 1 ] || fail "second task appeared more than once in the reminder"
   if grep -q "批准" "$LOG1"; then fail "authorize fired without ask-evidence"; fi
