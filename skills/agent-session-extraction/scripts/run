@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+set -eu
+SCRIPT_DIR=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd -P)
+SKILL_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$SKILL_ROOT/src${PYTHONPATH:+:$PYTHONPATH}" \
+  exec python3 -B -m agent_skills.sessions.scheduled "$@"

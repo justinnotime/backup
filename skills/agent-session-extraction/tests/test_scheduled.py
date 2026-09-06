@@ -1,0 +1,218 @@
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from session_test_support import manifest_data, write_manifest
+from test_session_pipeline import tree_digest, write_claude
+
+SKILL = Path(__file__).resolve().parents[1]
+
+
+def git(root, *args):
+    return subprocess.check_output(["git", "-C", str(root), *args], text=True).strip()
+
+
+@pytest.fixture
+def scheduled(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        monkeypatch.delenv(name, raising=False)
+    subprocess.run(["git", "config", "--global", "user.name", "Example"], check=True)
+    subprocess.run(["git", "config", "--global", "user.email", "example@example.invalid"], check=True)
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    git(repository, "init", "--initial-branch=main")
+    (repository / "protected.txt").write_text("preserved\n")
+    git(repository, "add", ".")
+    git(repository, "commit", "-m", "Synthetic initial content")
+    sources = tmp_path / "sources"
+    sources.mkdir()
+    write_claude(sources / "example.jsonl")
+    other = tmp_path / "another-profile"
+    other.mkdir()
+    write_claude(other / "unselected.jsonl", text="unselected synthetic text")
+    manifest = write_manifest(tmp_path / "manifest.json", manifest_data(
+        sources, repository, publisher="filesystem-atomic", indexes="owner"))
+    publisher = tmp_path / "publisher.py"
+    publisher.write_text('''import os, subprocess, sys
+from pathlib import Path
+repository, worktree = map(Path, sys.argv[1:3])
+def git(*args):
+    return subprocess.check_output(['git', '-C', str(repository), *args], text=True)
+if worktree.exists():
+    git('worktree', 'remove', str(worktree))
+git('worktree', 'add', '--detach', str(worktree), 'HEAD')
+result = subprocess.run(sys.argv[3:], env={**os.environ, 'EXAMPLE_OUTPUT': str(worktree)})
+if result.returncode:
+    raise SystemExit(result.returncode)
+subprocess.run(['git', '-C', str(worktree), 'add', '--', 'History', 'Prompts'], check=True)
+changed = subprocess.run(['git', '-C', str(worktree), 'diff', '--cached', '--quiet']).returncode
+if changed:
+    subprocess.run(['git', '-C', str(worktree), 'commit', '-m', 'Synthetic extracted content'], check=True)
+    commit = subprocess.check_output(['git', '-C', str(worktree), 'rev-parse', 'HEAD'], text=True).strip()
+    git('update-ref', 'refs/heads/published', commit)
+''')
+    cfg = {
+        "schema_version": "agent-session-schedule/v1", "manifest": str(manifest),
+        "repository_root": str(repository),
+        "failure_marker": str(tmp_path / "state" / "failure.json"),
+        "publication": {"command": [sys.executable, str(publisher), "{repository_root}",
+                                    str(tmp_path / "output")],
+                        "output_root_environment": "EXAMPLE_OUTPUT"},
+    }
+    config = tmp_path / "schedule.json"
+
+    def invoke(*args, extra_env=None):
+        config.write_text(json.dumps(cfg))
+        return subprocess.run([str(SKILL / "scripts/run"), "--config", str(config), *args],
+                              env={**os.environ, **(extra_env or {})}, cwd=tmp_path,
+                              capture_output=True, text=True, timeout=30)
+
+    return cfg, invoke, repository, sources, tmp_path
+
+
+def test_actual_extraction_uses_only_manifest_source_and_owned_paths(scheduled):
+    cfg, invoke, repository, _, root = scheduled
+    original = git(repository, "rev-parse", "HEAD")
+    result = invoke()
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = json.loads(result.stdout)
+    assert report["status"] == "ok" and report["session_count"] == 1
+    published = git(repository, "rev-parse", "published")
+    changed = git(repository, "diff", "--name-only", original, published).splitlines()
+    assert changed and all(path.startswith(("History/", "Prompts/")) for path in changed)
+    assert git(repository, "rev-parse", "HEAD") == original
+    assert git(repository, "status", "--porcelain") == ""
+    assert git(repository, "show", "published:protected.txt") == "preserved"
+    output = "".join(path.read_text() for path in (root / "output").rglob("*.md"))
+    assert "synthetic request" in output
+    assert "unselected synthetic text" not in output
+    assert "synthetic request" not in result.stdout + result.stderr
+    assert not Path(cfg["failure_marker"]).exists()
+
+
+def test_doctor_and_dry_run_never_invoke_publisher_or_write(scheduled):
+    cfg, invoke, repository, _, root = scheduled
+    cfg["publication"]["command"] = [sys.executable, "-c", "raise SystemExit(99)"]
+    for mode in ("--doctor", "--dry-run"):
+        before = tree_digest(repository)
+        result = invoke(mode)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert json.loads(result.stdout)["status"] == "ok"
+        assert tree_digest(repository) == before
+        assert not (root / "output").exists()
+        assert not Path(cfg["failure_marker"]).exists()
+
+
+def test_main_checkout_output_is_rejected(scheduled):
+    _, invoke, repository, _, _ = scheduled
+    result = invoke("--write", extra_env={"EXAMPLE_OUTPUT": str(repository)})
+    assert result.returncode != 0
+    assert json.loads(result.stdout)["code"] == "isolated_worktree_required"
+    assert git(repository, "status", "--porcelain") == ""
+
+
+def test_foreign_worktree_is_rejected(scheduled):
+    _, invoke, _, _, root = scheduled
+    other = root / "foreign"
+    other.mkdir()
+    git(other, "init")
+    result = invoke("--write", extra_env={"EXAMPLE_OUTPUT": str(other)})
+    assert result.returncode != 0
+    assert json.loads(result.stdout)["code"] == "foreign_worktree"
+
+
+def test_primary_checkout_refused_when_config_names_a_linked_checkout(scheduled):
+    cfg, invoke, repository, _, root = scheduled
+    linked = root / "linked-source"
+    git(repository, "worktree", "add", "--detach", str(linked))
+    cfg["repository_root"] = str(linked)
+    manifest = Path(cfg["manifest"])
+    data = json.loads(manifest.read_text())
+    data["output"]["repository_root"] = str(linked)
+    manifest.write_text(json.dumps(data))
+    result = invoke("--write", extra_env={"EXAMPLE_OUTPUT": str(repository)})
+    assert result.returncode != 0
+    assert json.loads(result.stdout)["code"] == "isolated_worktree_required"
+    assert git(repository, "status", "--porcelain") == ""
+
+
+def test_missing_source_does_not_publish(scheduled):
+    cfg, invoke, repository, sources, _ = scheduled
+    (sources / "example.jsonl").unlink()
+    result = invoke()
+    assert result.returncode != 0
+    assert git(repository, "status", "--porcelain") == ""
+    assert subprocess.run(["git", "-C", str(repository), "rev-parse", "--verify", "published"],
+                          capture_output=True).returncode != 0
+    failure = json.loads(Path(cfg["failure_marker"]).read_text())
+    assert failure["status"] == "failed"
+    report = json.loads(result.stdout)
+    assert report["code"] != "publication_failed"
+    assert report["diagnostics"]
+    assert Path(cfg["failure_marker"]).stat().st_mode & 0o777 == 0o600
+
+
+def test_publisher_failure_is_sanitized_and_marked(scheduled):
+    cfg, invoke, _, _, _ = scheduled
+    cfg["publication"]["command"] = [sys.executable, "-c",
+        "import sys; print('private simulated publisher text'); raise SystemExit(7)"]
+    result = invoke()
+    assert result.returncode != 0
+    assert "private simulated publisher text" not in result.stdout + result.stderr
+    assert json.loads(result.stdout)["code"] == "publication_failed"
+    assert Path(cfg["failure_marker"]).is_file()
+
+
+def test_busy_publisher_is_reported_as_skipped(scheduled):
+    cfg, invoke, _, _, root = scheduled
+    cfg["publication"]["command"] = [sys.executable, "-c", "pass"]
+    result = invoke()
+    assert result.returncode == 0
+    assert json.loads(result.stdout)["status"] == "skipped"
+    assert not (root / "output").exists()
+
+
+@pytest.mark.parametrize("field", ["require_output_audit", "require_reconciliation",
+                                    "require_redaction_self_test", "require_prepublication_scan"])
+def test_disabled_required_check_is_rejected(scheduled, field):
+    cfg, invoke, _, _, root = scheduled
+    manifest = Path(cfg["manifest"])
+    data = json.loads(manifest.read_text())
+    data["gates"][field] = False
+    manifest.write_text(json.dumps(data))
+    result = invoke()
+    assert result.returncode != 0
+    assert not (root / "output").exists()
+
+
+def test_repository_mismatch_rejected_before_publication(scheduled):
+    cfg, invoke, _, _, root = scheduled
+    cfg["repository_root"] = str(root)
+    result = invoke()
+    assert result.returncode != 0
+    assert json.loads(result.stdout)["code"] == "repository_mismatch"
+
+
+def test_configured_validation_failure_prevents_commit(scheduled):
+    cfg, invoke, repository, _, _ = scheduled
+    cfg["validate_command"] = [sys.executable, "-c", "raise SystemExit(4)"]
+    assert invoke().returncode != 0
+    assert subprocess.run(["git", "-C", str(repository), "rev-parse", "--verify", "published"],
+                          capture_output=True).returncode != 0
+
+
+def test_no_implicit_configuration(tmp_path):
+    result = subprocess.run([str(SKILL / "scripts/run")], cwd=tmp_path,
+                            capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "--config" in result.stderr
