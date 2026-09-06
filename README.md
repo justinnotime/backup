@@ -64,6 +64,7 @@ reusing that name removes the redirect.
 | `skills/privacy-lint/` | Publication privacy review with optional private identifier patterns |
 | `skills/teams-send/` | Authorized Teams chat sending through caller-owned credentials or an external connector |
 | `skills/chat-mentions/` | Read-only Teams attention collection and a local reply-draft box |
+| `skills/google-docs-authority/` | Caller-configured document publication, authority registry and stable text comparison |
 | `skills/structure-lint/` | Repository structure review using caller-owned contracts and checks |
 | `skills/chat-draft/` | Targeted chat reading and reply drafting through configured readers |
 | `skills/agent-session-extraction/src/agent_skills/sessions/` | Package-owned normalized-session runtime |
@@ -207,6 +208,7 @@ or shared source directory. Run additional checks from the affected package:
 (cd skills/privacy-lint && uv run --locked skills-ref validate "$PWD")
 (cd skills/teams-send && uv run --locked pytest tests)
 (cd skills/chat-mentions && uv run --locked pytest tests)
+(cd skills/google-docs-authority && uv run --locked pytest tests)
 (cd skills/structure-lint && uv run --locked skills-ref validate "$PWD")
 (cd skills/chat-draft && uv run --locked skills-ref validate "$PWD")
 (cd skills/slack-archive && uv run --locked pytest tests)
