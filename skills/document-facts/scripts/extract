@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+export PYTHONPATH="$script_dir/../src${PYTHONPATH:+:$PYTHONPATH}"
+exec "${DOCUMENT_FACTS_PYTHON:-python3}" -B -m document_facts.runtime "$@"
