@@ -29,6 +29,14 @@ caller-owned installation prerequisites; their external effects are not rolled
 back if crontab installation later fails.
 
 Read [configuration.md](references/configuration.md) for the JSON fields and
-synthetic examples. The package has no third-party runtime dependencies; run
-its tests with `uv run --locked pytest tests -q`. Development dependencies are
-in the default `dev` dependency group.
+synthetic examples. The package has no third-party runtime dependencies.
+Development dependencies are in the default `dev` dependency group. From this
+package directory, run the same checks as CI:
+
+```sh
+uv sync --locked --all-extras
+uv run --no-sync pytest tests -q -rs
+uv run --no-sync ruff check src tests
+# Python 3.11 or later:
+uv run --no-sync agentskills validate "$PWD"
+```

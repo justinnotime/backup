@@ -7,12 +7,13 @@ import contextlib
 import fcntl
 import json
 import os
-from pathlib import Path
 import re
 import shlex
 import subprocess
 import sys
 import tempfile
+from itertools import pairwise
+from pathlib import Path
 
 
 class InstallError(Exception):
@@ -52,7 +53,11 @@ def command(spec):
         environment[name] = string(value)
     try:
         result = subprocess.run(
-            args, env=environment, capture_output=True, timeout=spec.get("timeout", 60)
+            args,
+            env=environment,
+            capture_output=True,
+            timeout=spec.get("timeout", 60),
+            check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise InstallError(spec.get("message", "configured command failed")) from exc
@@ -284,7 +289,7 @@ def cron_text(original, config):
             intervals.append((a, b))
     intervals.sort()
     if any(
-        a <= previous_b for (_, previous_b), (a, _) in zip(intervals, intervals[1:])
+        a <= previous_b for (_, previous_b), (a, _) in pairwise(intervals)
     ):
         raise InstallError("refusing overlapping cron marker blocks")
     remove = [argv(item) for item in config.get("remove_commands", [])]
@@ -319,7 +324,7 @@ def cron_text(original, config):
 
 
 def read_cron(executable):
-    result = subprocess.run(executable + ["-l"], capture_output=True)
+    result = subprocess.run(executable + ["-l"], capture_output=True, check=False)
     if result.returncode:
         if result.returncode == 1 and b"no crontab" in result.stderr.lower():
             return b"", False
@@ -331,7 +336,9 @@ def write_cron(executable, content):
     with tempfile.NamedTemporaryFile(prefix="runtime-install-cron-") as handle:
         handle.write(content)
         handle.flush()
-        result = subprocess.run(executable + [handle.name], capture_output=True)
+        result = subprocess.run(
+            executable + [handle.name], capture_output=True, check=False
+        )
     if result.returncode:
         raise InstallError("crontab installation failed")
 
@@ -368,15 +375,15 @@ def install_cron(config, *, dry_run):
             installed, _ = read_cron(executable)
             if installed != new:
                 raise InstallError("crontab verification failed")
-        except Exception:
+        except Exception:  # noqa: BLE001 - Restore the old crontab after any failed write or verification.
             try:
                 if existed:
                     write_cron(executable, old)
                 elif subprocess.run(
-                    executable + ["-r"], capture_output=True
+                    executable + ["-r"], capture_output=True, check=False
                 ).returncode:
                     raise InstallError("unable to restore absent crontab")
-            except Exception:
+            except Exception:  # noqa: BLE001 - Report failed restoration without external diagnostics.
                 raise InstallError(
                     "installation failed; previous crontab restoration failed"
                 ) from None
