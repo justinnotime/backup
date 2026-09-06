@@ -255,6 +255,13 @@ jobs:
           bash tests/test-tview.sh
           bash tests/test-tview-regression.sh
           bash tests/test-fleet-staging.sh
+          bash tests/test-agent-boot-harness.sh
+          bash tests/test-agent-boot-restart-guard.sh
+          bash tests/test-agent-bus-cli.sh
+          bash tests/test-fleet-lint.sh
+          uv run --no-sync python scripts/merge-receipt.py --self-test
+          uv run --no-sync python scripts/pr-green-unreviewed.py --self-test
+          uv run --no-sync python scripts/pr-red-triage.py --self-test
       - name: Check portable runtime packages
         if: matrix.skill == 'repository-publish' || matrix.skill == 'secret-lint' || matrix.skill == 'structure-lint' || matrix.skill == 'genteam'
         working-directory: ${{ runner.temp }}/skill-check/${{ matrix.skill }}
