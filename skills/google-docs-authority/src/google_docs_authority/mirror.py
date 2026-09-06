@@ -1499,7 +1499,21 @@ def sync_doc(
     drive_ver = None
     drive_name = None
     if not from_cache:
-        meta = drive_meta(doc_id, "version,name")
+        try:
+            meta = drive_meta(doc_id, "version,name")
+        except (HTTPError, URLError, TimeoutError) as error:
+            meta = None
+            diagnostic = (
+                f"http-{error.code}"
+                if isinstance(error, HTTPError)
+                else "timeout"
+                if isinstance(error, TimeoutError)
+                else "network"
+            )
+            print(
+                f"  WARN version preflight failed ({diagnostic}); attempting full export",
+                file=sys.stderr,
+            )
         if meta:
             drive_ver = meta.get("version")
             drive_name = meta.get("name")

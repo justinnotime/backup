@@ -14,7 +14,7 @@ import pytest
 import yaml
 from PIL import Image
 
-from google_docs_authority import config, mirror
+from google_docs_authority import config, mirror, oauth
 
 DOC_ID = "syntheticDocumentAlpha001"
 SECOND_ID = "syntheticDocumentBeta0002"
@@ -179,14 +179,142 @@ def test_dry_run_does_not_touch_cache_output_or_network(profile, capsys):
     assert not Path(profile[1]["mirror"]["cache_directory"]).exists()
 
 
-def test_metadata_failure_is_not_a_successful_skip(profile, monkeypatch):
+@pytest.mark.parametrize(
+    ("failure", "diagnostic"),
+    [
+        (
+            HTTPError(
+                "https://example.invalid/private", 503, "private detail", {}, None
+            ),
+            "http-503",
+        ),
+        (URLError("private detail"), "network"),
+        (TimeoutError("private detail"), "timeout"),
+    ],
+    ids=["http", "network", "timeout"],
+)
+def test_preflight_transport_failure_exports_and_saves_checkpoint(
+    profile, monkeypatch, capsys, failure, diagnostic
+):
+    export(monkeypatch, "# Sample\n\nOriginal words.\n")
+    assert run(profile) == 0
+    capsys.readouterr()
+    calls = []
+    replacement = b"# Sample\n\nUpdated words from the full export.\n"
+
+    def metadata(doc_id, fields):
+        assert fields == "version,name"
+        calls.append("preflight")
+        raise failure
+
+    def markdown(*args, **kwargs):
+        calls.append("export")
+        return replacement
+
+    monkeypatch.setattr(mirror, "drive_meta", metadata)
+    monkeypatch.setattr(mirror, "fetch_markdown", markdown)
+    assert run(profile) == 0
+    assert calls == ["preflight", "export"]
+    checkpoint = json.loads(Path(profile[1]["mirror"]["state_file"]).read_text())
+    assert checkpoint[DOC_ID]["mdSha1"] == hashlib.sha1(replacement).hexdigest()
+    assert "driveVersion" not in checkpoint[DOC_ID]
+    assert (
+        profile[2] / "archive/sample--syntheti/README.md"
+    ).read_text() == mirror.README_HEADER + replacement.decode()
+    output = capsys.readouterr()
+    assert diagnostic in output.err
+    assert "private detail" not in output.out + output.err
+    assert "example.invalid" not in output.out + output.err
+
+
+def test_preflight_and_body_failure_preserve_checkpoint(profile, monkeypatch):
+    export(monkeypatch, "# Sample\n\nOriginal words.\n")
+    assert run(profile) == 0
+    checkpoint = Path(profile[1]["mirror"]["state_file"])
+    before = checkpoint.read_bytes()
+    readme = profile[2] / "archive/sample--syntheti/README.md"
+    old_body = readme.read_bytes()
+    calls = []
+
+    def metadata(*args):
+        calls.append("preflight")
+        raise URLError("synthetic outage")
+
+    def markdown(*args, **kwargs):
+        calls.append("export")
+        raise HTTPError("https://example.invalid", 404, "unavailable", {}, None)
+
+    monkeypatch.setattr(mirror, "drive_meta", metadata)
+    monkeypatch.setattr(mirror, "fetch_markdown", markdown)
+    assert run(profile) == 1
+    assert calls == ["preflight", "export"]
+    assert checkpoint.read_bytes() == before
+    assert readme.read_bytes() == old_body
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        oauth.OAuthError("token-file-unreadable-or-invalid"),
+        ValueError("mirror-drive-metadata-invalid"),
+    ],
+    ids=["oauth", "metadata-schema"],
+)
+def test_preflight_configuration_failure_does_not_export(profile, monkeypatch, failure):
+    checkpoint = Path(profile[1]["mirror"]["state_file"])
+    checkpoint.write_text('{"previous": "checkpoint"}\n')
+    before = checkpoint.read_bytes()
+    exports = []
+
+    def metadata(*args):
+        raise failure
+
+    def markdown(*args, **kwargs):
+        exports.append(args)
+        return b"# Sample\n\nUnexpected full export.\n"
+
+    monkeypatch.setattr(mirror, "drive_meta", metadata)
+    monkeypatch.setattr(mirror, "fetch_markdown", markdown)
+    assert run(profile) == 1
+    assert exports == []
+    assert checkpoint.read_bytes() == before
+
+
+def test_export_links_metadata_failure_keeps_checkpoint(profile, monkeypatch):
+    checkpoint = Path(profile[1]["mirror"]["state_file"])
+    checkpoint.write_text('{"previous": "checkpoint"}\n')
+    before = checkpoint.read_bytes()
+    calls = []
+
+    def metadata(doc_id, fields):
+        calls.append(fields)
+        if fields == "version,name":
+            return {"version": "1", "name": "Sample"}
+        assert fields == "exportLinks"
+        raise URLError("synthetic outage")
+
+    def request(*args, **kwargs):
+        raise HTTPError(
+            "https://example.invalid",
+            403,
+            "export limit",
+            {},
+            io.BytesIO(b'{"error":{"reason":"exportSizeLimitExceeded"}}'),
+        )
+
+    monkeypatch.setattr(mirror, "drive_meta", metadata)
+    monkeypatch.setattr(mirror, "get_access_token", lambda: "synthetic-access")
+    monkeypatch.setattr(mirror, "open_request", request)
     monkeypatch.setattr(
         mirror,
-        "drive_meta",
-        lambda *a: (_ for _ in ()).throw(URLError("synthetic outage")),
+        "fetch_markdown",
+        lambda doc_id, *a, **k: mirror.fetch_export_authenticated(
+            doc_id, "text/markdown"
+        ),
     )
     assert run(profile) == 1
-    assert not Path(profile[1]["mirror"]["state_file"]).exists()
+    assert calls == ["version,name", "exportLinks"]
+    assert checkpoint.read_bytes() == before
 
 
 def test_markdown_server_failure_is_not_hidden_by_html_fallback(profile, monkeypatch):
