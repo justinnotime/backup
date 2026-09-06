@@ -14,6 +14,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - skill: slack-archive
+            kind: python
+            python: "3.10"
+            check: Python 3.10
+          - skill: slack-archive
+            kind: python
+            python: "3.14"
+            check: Python 3.14
           - skill: github-archive
             kind: python
             python: "3.10"

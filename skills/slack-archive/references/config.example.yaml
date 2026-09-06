@@ -1,0 +1,13 @@
+slack:
+  output_dir: archive
+  state_file: state/slack.json
+  request_interval: 1.3
+  page_size: 200
+  bootstrap_days: 14
+  workspaces:
+    - name: example
+      token_file: /path/to/private/slack-user-token
+      mode: whitelist
+      chats:
+        - match: CEXAMPLE
+          alias: project-chat
