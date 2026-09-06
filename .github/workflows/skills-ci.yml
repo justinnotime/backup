@@ -14,6 +14,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - skill: pr-status-table
+            kind: instruction
+            python: "3.14"
+            check: Skill format
+          - skill: realign
+            kind: instruction
+            python: "3.14"
+            check: Skill format
           - skill: draft-human-reply
             kind: instruction
             python: "3.14"
