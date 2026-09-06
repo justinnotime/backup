@@ -16,6 +16,7 @@ The schedule JSON contains:
 | `publication.output_root_environment` | Variable in which that publisher supplies its output worktree |
 | `environment` | Optional explicit environment overrides for the publisher |
 | `failure_marker` | Optional absolute path for a sanitized failure report |
+| `preflight_command` | Optional read-only argument array checking consumer policy before every mode, including doctor and dry-run |
 | `validate_command` | Optional argument array validating the generated output |
 
 The publisher receives the extraction command appended to its argument array.
@@ -30,14 +31,23 @@ to one space-separated argument and therefore accepts only unambiguous path
 components. Source selection, node ownership, cleanup, indexes, redaction,
 retention, and output naming remain in the existing manifest.
 
-The publisher creates a linked Git worktree, invokes the appended command,
+For `filesystem-atomic`, the publisher creates a linked Git worktree and invokes
+the appended command. For `git-worktree`, it reserves an unused absolute path
+outside the source repository and passes that path through the configured
+output environment variable without creating it. The appended command uses the
+existing runtime to prepare, encrypt, audit, and stage that worktree.
+
+In both cases the publisher invokes the appended command,
 and commits/pushes only after that command succeeds. The extraction command
 refuses the main checkout and worktrees belonging to another repository.
 The external publisher owns locking, Git conflict handling, repository policy,
 attachment delivery, and progress-state publication. Existing publisher
 implementations can be reused without copying their private policy here.
 
-The manifest must use `filesystem-atomic`: the publisher owns Git publication.
+The manifest must use `filesystem-atomic` or `git-worktree`. The latter retains
+the manifest's key link and ciphertext-index checks; commit and push still belong
+to the external publisher. A configured preflight runs before reading sources
+in every mode; its output is suppressed and failure aborts the invocation.
 Scheduled extraction requires redaction, output auditing, reconciliation, and
 prepublication scanning. Failure in extraction or configured validation must
 abort the publisher. Publisher failures produce a nonzero exit status and the

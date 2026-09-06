@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -216,3 +217,96 @@ def test_no_implicit_configuration(tmp_path):
                             capture_output=True, text=True)
     assert result.returncode != 0
     assert "--config" in result.stderr
+
+
+@pytest.mark.parametrize("mode", ["--doctor", "--dry-run", "--write", "publish"])
+def test_preflight_failure_blocks_every_mode_without_relaying_output(scheduled, mode):
+    cfg, invoke, repository, _, root = scheduled
+    cfg["preflight_command"] = [sys.executable, "-c",
+        "print('private synthetic policy output'); raise SystemExit(7)"]
+    result = invoke(*([] if mode == "publish" else [mode]))
+    assert result.returncode != 0
+    assert json.loads(result.stdout)["code"] == "preflight_failed"
+    assert "private synthetic" not in result.stdout + result.stderr
+    assert git(repository, "status", "--porcelain") == ""
+    assert not (root / "output").exists()
+    assert Path(cfg["failure_marker"]).exists() == (mode in {"--write", "publish"})
+
+
+def use_runtime_worktree(cfg):
+    manifest = Path(cfg["manifest"])
+    data = json.loads(manifest.read_text())
+    data["publisher"]["strategy"] = "git-worktree"
+    manifest.write_text(json.dumps(data))
+    publisher = Path(cfg["publication"]["command"][1])
+    text = publisher.read_text().replace(
+        "git('worktree', 'add', '--detach', str(worktree), 'HEAD')", "# Runtime prepares the reserved path")
+    publisher.write_text(text)
+
+
+def test_runtime_prepares_and_stages_scheduled_worktree(scheduled):
+    cfg, invoke, repository, _, root = scheduled
+    use_runtime_worktree(cfg)
+    original = git(repository, "rev-parse", "HEAD")
+    result = invoke()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout)["session_count"] == 1
+    assert git(repository, "rev-parse", "published") != original
+    assert git(repository, "rev-parse", "HEAD") == original
+    assert git(repository, "status", "--porcelain") == ""
+    assert (root / "output/.git").is_file()
+
+
+@pytest.mark.parametrize("target", ["main", "inside", "existing", "relative", "symlink"])
+def test_runtime_worktree_refuses_unsafe_destinations(scheduled, target):
+    cfg, invoke, repository, _, root = scheduled
+    use_runtime_worktree(cfg)
+    destinations = {"main": repository, "inside": repository / "new-worktree",
+                    "existing": root, "relative": Path("relative-output"),
+                    "symlink": root / "alias"}
+    (root / "alias").symlink_to(repository, target_is_directory=True)
+    result = invoke("--write", extra_env={"EXAMPLE_OUTPUT": str(destinations[target])})
+    assert result.returncode != 0
+    assert json.loads(result.stdout)["code"] == "unused_external_worktree_required"
+    assert git(repository, "status", "--porcelain") == ""
+
+
+def test_runtime_worktree_dry_modes_do_not_prepare_or_publish(scheduled):
+    cfg, invoke, repository, _, root = scheduled
+    use_runtime_worktree(cfg)
+    cfg["publication"]["command"] = [sys.executable, "-c", "raise SystemExit(99)"]
+    for mode in ("--doctor", "--dry-run"):
+        assert invoke(mode).returncode == 0
+        assert not (root / "output").exists()
+        assert not Path(cfg["failure_marker"]).exists()
+        assert git(repository, "status", "--porcelain") == ""
+
+
+@pytest.mark.skipif(not shutil.which("git-crypt"), reason="git-crypt unavailable")
+def test_scheduled_runtime_worktree_encrypts_real_index(scheduled):
+    cfg, invoke, repository, _, root = scheduled
+    use_runtime_worktree(cfg)
+    subprocess.run(["git-crypt", "init"], cwd=repository, capture_output=True, check=True)
+    (repository / ".gitattributes").write_text(
+        "History/** filter=git-crypt diff=git-crypt\nPrompts/** filter=git-crypt diff=git-crypt\n")
+    git(repository, "add", ".gitattributes")
+    git(repository, "commit", "-m", "Synthetic encryption attributes")
+    manifest = Path(cfg["manifest"])
+    data = json.loads(manifest.read_text())
+    key = repository / ".git/git-crypt/keys/default"
+    data["publisher"].update(encryption="git-crypt", key_link={
+        "source": str(key), "target": "git-crypt/keys/default"})
+    manifest.write_text(json.dumps(data))
+    result = invoke()
+    assert result.returncode == 0, result.stdout + result.stderr
+    worktree = root / "output"
+    private = Path(git(worktree, "rev-parse", "--absolute-git-dir"))
+    link = private / "git-crypt/keys/default"
+    assert link.is_symlink() and link.resolve() == key
+    paths = git(repository, "ls-tree", "-r", "--name-only", "published", "History", "Prompts").splitlines()
+    assert paths
+    for path in paths:
+        blob = subprocess.check_output(["git", "-C", str(repository), "show", "published:" + path])
+        assert blob.startswith(b"\x00GITCRYPT")
+        assert b"synthetic request" not in blob
+        assert not (worktree / path).read_bytes().startswith(b"\x00GITCRYPT")

@@ -35,7 +35,7 @@ def load_schedule(path: Path) -> dict:
     cfg = json.loads(path.read_text())
     required = {"schema_version", "manifest", "repository_root", "publication"}
     if (not isinstance(cfg, dict) or not required <= cfg.keys()
-            or cfg.keys() - required - {"environment", "failure_marker", "validate_command"}
+            or cfg.keys() - required - {"environment", "failure_marker", "validate_command", "preflight_command"}
             or cfg["schema_version"] != SCHEMA):
         raise ScheduleError("invalid_schedule")
     for field in ("manifest", "repository_root", "failure_marker"):
@@ -45,7 +45,8 @@ def load_schedule(path: Path) -> dict:
     if (not isinstance(publication, dict)
             or set(publication) != {"command", "output_root_environment"}):
         raise ScheduleError("invalid_publisher")
-    for command in (publication["command"], cfg.get("validate_command", [])):
+    for command in (publication["command"], cfg.get("validate_command", []),
+                    cfg.get("preflight_command", [])):
         if (not isinstance(command, list)
                 or any(not isinstance(arg, str) or "\0" in arg for arg in command)):
             raise ScheduleError("invalid_command")
@@ -67,10 +68,10 @@ def context(cfg: dict):
     manifest = api.load_manifest(cfg["manifest"], environ={**os.environ, **cfg.get("environment", {})})
     if manifest.output.repository_root.resolve() != Path(cfg["repository_root"]).resolve():
         raise ScheduleError("repository_mismatch")
-    # The external publisher owns Git checkout, encryption, commit, and push.
-    # This invocation only materializes files inside its authorized worktree.
-    if manifest.publisher.strategy != "filesystem-atomic":
-        raise ScheduleError("external_publication_requires_filesystem_output")
+    # The external publisher always owns commit/push. With git-worktree,
+    # the runtime also prepares and audits the explicitly reserved checkout.
+    if manifest.publisher.strategy not in {"filesystem-atomic", "git-worktree"}:
+        raise ScheduleError("external_publication_requires_mutating_output")
     if not manifest.redaction.required or not all((
         manifest.gates.require_redaction_self_test, manifest.gates.require_output_audit,
         manifest.gates.require_reconciliation, manifest.gates.require_prepublication_scan,
@@ -119,6 +120,7 @@ def require_worktree(root: Path, repository: Path) -> None:
 
 
 def extract(cfg: dict, manifest, *, dry_run: bool) -> dict:
+    prepare_worktree = not dry_run and manifest.publisher.strategy == "git-worktree"
     if dry_run:
         output = Path(cfg["repository_root"])
     else:
@@ -126,11 +128,20 @@ def extract(cfg: dict, manifest, *, dry_run: bool) -> dict:
         if not value:
             raise ScheduleError("publisher_output_missing")
         output = Path(value)
-        require_worktree(output, Path(cfg["repository_root"]))
+        if prepare_worktree:
+            if (not output.is_absolute() or output.exists() or output.is_symlink()
+                    or output.resolve().is_relative_to(Path(cfg["repository_root"]).resolve())):
+                raise ScheduleError("unused_external_worktree_required")
+        else:
+            require_worktree(output, Path(cfg["repository_root"]))
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-        report = api.run(cfg["manifest"], dry_run=dry_run, output_root=output,
+        report = api.run(cfg["manifest"], dry_run=dry_run,
+                         output_root=None if prepare_worktree else output,
+                         git_worktree_destination=output if prepare_worktree else None,
                          environ={**os.environ, **cfg.get("environment", {})},
                          failure_marker=None if dry_run else marker(cfg))
+    if prepare_worktree:
+        require_worktree(output, Path(cfg["repository_root"]))
     if not dry_run and cfg.get("validate_command"):
         result = subprocess.run(expand(cfg["validate_command"], substitutions(cfg, manifest, output)),
                                 cwd=output, capture_output=True, check=False)
@@ -156,6 +167,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         cfg = load_schedule(args.config)
         manifest = context(cfg)
+        if cfg.get("preflight_command"):
+            preflight = subprocess.run(
+                expand(cfg["preflight_command"], substitutions(cfg, manifest)),
+                cwd=cfg["repository_root"],
+                env={**os.environ, **cfg.get("environment", {})},
+                capture_output=True, check=False)
+            if preflight.returncode:
+                raise ScheduleError("preflight_failed")
         if args.doctor:
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 result = api.doctor(cfg["manifest"], environ={**os.environ, **cfg.get("environment", {})})
