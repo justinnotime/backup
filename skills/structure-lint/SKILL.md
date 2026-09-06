@@ -21,6 +21,22 @@ worktree isolation. Record the baseline before edits when needed to distinguish
 new failures from existing warnings. Inspect the actual exit status and full
 summary; a command being present or starting successfully is not a passing check.
 
+This package includes a complete configurable checker, its regression tests,
+and locked development dependencies. Run it with the repository's explicit
+rule file:
+
+```bash
+/path/to/structure-lint/scripts/check --root /path/to/project --config /private/rules.json
+```
+
+The runtime needs Python 3.10 or newer and no third-party runtime packages.
+Read [configuration and commands](references/configuration.md) before creating
+rules; [the example](references/example.json) contains synthetic conventions.
+`--format json` and `--format tsv` provide machine-readable findings. The default
+text summary and exit status support existing publication policies. External
+validators and optional Git fetching execute only when the configuration asks
+for them; treat that configuration as executable operator policy.
+
 Check the parts relevant to the change:
 
 - Documented directory roles match actual maintained directories and files.
@@ -52,6 +68,5 @@ Report the command, inspected revision or worktree, result location, error and
 warning totals with their baseline, unresolved findings, and what was not checked.
 Do not describe a partial check as complete repository consistency.
 
-This Skill is a procedure for using the repository's checks, not a bundled
-schema or detection engine. Development format validation is
-`uv run --project /path/to/structure-lint --locked skills-ref validate /path/to/structure-lint`.
+For development, run `uv run --locked pytest -q`, `uv run --locked ruff check src tests`,
+and `uv run --locked skills-ref validate "$PWD"` from this package in a task worktree.

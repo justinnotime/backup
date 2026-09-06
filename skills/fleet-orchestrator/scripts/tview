@@ -1,0 +1,239 @@
+#!/usr/bin/env bash
+set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
+
+TMUX_BIN=${TMUX_BIN:-tmux}
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+if [[ -n ${TVIEW_FLEET_PROFILE:-} ]]; then
+  FLEET_PROFILE=$TVIEW_FLEET_PROFILE
+elif [[ -f "$HERE/lib/fleet-profile.py" ]]; then
+  FLEET_PROFILE="$HERE/lib/fleet-profile.py"
+else
+  FLEET_PROFILE="${FLEET_ORCHESTRATOR_ROOT:?set FLEET_ORCHESTRATOR_ROOT when copying this executable}/scripts/lib/fleet-profile.py"
+fi
+
+usage() {
+  cat <<'USAGE'
+Usage: tview [WINDOW]
+       tview --fleet NAME [WINDOW]
+       tview [--fleet NAME] --window WINDOW
+
+Attach through a persistent grouped view dedicated to this terminal. The view
+shares windows/processes with the primary session but keeps an independent
+current window. One positional argument always selects a window by index or
+exact name. With no explicit fleet, tview inherits a named NW_FLEET when
+present; otherwise it keeps its original behavior on session 0 of the
+current/default tmux server. A named fleet resolves its isolated tmux server
+and primary session internally; sessions are not part of the public interface.
+
+Safety contract: tview never destroys the primary session or ANY attached
+session, and never enables tmux's automatic session destruction. The one
+automatic cleanup: a DETACHED tview-* view idle
+longer than 48h is reaped at tview startup - views in use are untouchable
+by construction. Disable with TVIEW_REAP=off; tune with TVIEW_REAP_IDLE_S.
+USAGE
+}
+
+fail_usage() {
+  echo "tview: $1" >&2
+  usage >&2
+  exit 2
+}
+
+fleet=
+fleet_set=0
+primary=
+requested_window=
+window_set=0
+positionals=()
+while (( $# )); do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --fleet)
+      (( $# >= 2 )) || fail_usage "--fleet needs a name"
+      (( fleet_set == 0 )) || fail_usage "--fleet may be given only once"
+      fleet=$2
+      fleet_set=1
+      shift 2
+      ;;
+    --session)
+      fail_usage "--session was removed; choose a fleet and window only"
+      ;;
+    --window)
+      (( $# >= 2 )) || fail_usage "--window needs an index or name"
+      (( window_set == 0 )) || fail_usage "--window may be given only once"
+      requested_window=$2
+      window_set=1
+      shift 2
+      ;;
+    --)
+      shift
+      positionals+=("$@")
+      break
+      ;;
+    -*)
+      fail_usage "unknown option '$1'"
+      ;;
+    *)
+      positionals+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if (( ${#positionals[@]} > 1 )); then
+  fail_usage "session selection was removed; expected at most one WINDOW"
+fi
+if (( ${#positionals[@]} == 1 )); then
+  (( window_set == 0 )) \
+    || fail_usage "WINDOW cannot be given both positionally and with --window"
+  requested_window=${positionals[0]}
+  window_set=1
+fi
+
+target_server=
+if (( fleet_set == 0 )) \
+    && [[ -n ${NW_FLEET:-} && ${NW_FLEET} != default ]]; then
+  fleet=$NW_FLEET
+  fleet_set=1
+fi
+if (( fleet_set )); then
+  [[ -n "$fleet" ]] || fail_usage "fleet name must not be empty"
+  [[ "$fleet" != default ]] \
+    || fail_usage "the default fleet needs no --fleet option"
+  target_server=$(python3 "$FLEET_PROFILE" resolve "$fleet" --field tmux_server)
+  primary=$(python3 "$FLEET_PROFILE" resolve "$fleet" --field primary_session)
+fi
+[[ -n "$primary" ]] || primary=0
+[[ $window_set -eq 0 || -n "$requested_window" ]] \
+  || fail_usage "window must not be empty"
+
+target_tmux() {
+  if [[ -n "$target_server" ]]; then
+    env -u TMUX "$TMUX_BIN" -L "$target_server" "$@"
+  else
+    "$TMUX_BIN" "$@"
+  fi
+}
+
+target_tmux has-session -t "=$primary" 2>/dev/null || {
+  echo "tview: primary session '$primary' not found" >&2
+  exit 1
+}
+
+primary_meta=$(target_tmux list-sessions -F \
+  '#{session_name}|#{session_group}|#{session_id}' \
+  | awk -F'|' -v wanted="$primary" '$1 == wanted {print; exit}')
+IFS='|' read -r _ primary_group primary_id <<<"$primary_meta"
+[[ -n "$primary_group" ]] || primary_group=$primary
+target_socket=$(target_tmux display-message -p -t "=$primary" '#{socket_path}')
+
+resolved_window=
+if (( window_set )); then
+  window_rows=$(target_tmux list-windows -t "=$primary" \
+    -F $'#{window_index}\t#{window_name}')
+  resolved_window=$(awk -F $'\t' -v wanted="$requested_window" \
+    '$1 == wanted {print $1; exit}' <<<"$window_rows")
+  if [[ -z "$resolved_window" ]]; then
+    name_matches=$(awk -F $'\t' -v wanted="$requested_window" '
+      substr($0, index($0, "\t") + 1) == wanted {print $1}
+    ' <<<"$window_rows")
+    match_count=$(awk 'NF {n++} END {print n+0}' <<<"$name_matches")
+    (( match_count <= 1 )) \
+      || { echo "tview: window name '$requested_window' is ambiguous in session '$primary'" >&2; exit 1; }
+    (( match_count == 1 )) && resolved_window=$name_matches
+  fi
+  [[ -n "$resolved_window" ]] || {
+    echo "tview: window '$requested_window' not found in session '$primary'" >&2
+    exit 1
+  }
+fi
+
+# Reap ONLY detached tview-* views idle >48h (the
+# Preserve primary sessions by
+# construction): the filter requires the tview- namespace AND zero
+# attached clients AND 48h of inactivity - the primary and every attached
+# view can never match. TVIEW_REAP=off disables the pass entirely.
+if [[ "${TVIEW_REAP:-on}" != "off" ]]; then
+  reap_idle_s=${TVIEW_REAP_IDLE_S:-172800}
+  now_s=$(date +%s)
+  while IFS='|' read -r name attached activity; do
+    case "$name" in tview-*) ;; *) continue ;; esac
+    [[ "$attached" == "0" ]] || continue
+    [[ -n "$activity" ]] || continue
+    (( now_s - activity > reap_idle_s )) || continue
+    target_tmux kill-session -t "=$name" 2>/dev/null \
+      && echo "tview: reaped detached view '$name' (idle >$((reap_idle_s / 3600))h)" >&2 \
+      || true
+  done < <(target_tmux list-sessions -F '#{session_name}|#{session_attached}|#{session_activity}' 2>/dev/null)
+fi
+
+tty_name=$(tty 2>/dev/null || true)
+inside_tmux=0
+client_group=
+client_window=
+current_socket=
+if [[ -n ${TMUX:-} ]]; then
+  # Inside tmux, `tty` is the shared pane TTY. client_tty identifies the
+  # terminal running this particular client and preserves per-terminal views.
+  # `|| true`: when TMUX leaks into an environment whose server has no
+  # client for us (nested/private servers, test fixtures), fall through to
+  # the pid key below instead of dying silently under set -e.
+  client_meta=$($TMUX_BIN display-message -p \
+    '#{client_tty}|#{socket_path}|#{session_name}|#{session_group}|#{window_index}' \
+    2>/dev/null || true)
+  if [[ -n "$client_meta" ]]; then
+    IFS='|' read -r tty_name current_socket client_session client_group client_window \
+      <<<"$client_meta"
+    [[ -n "$client_group" ]] || client_group=$client_session
+    [[ -n "$tty_name" && -n "$current_socket" ]] && inside_tmux=1
+  fi
+fi
+[[ "$tty_name" != "not a tty" && -n "$tty_name" ]] || tty_name="pid-$$"
+key=$(printf '%s' "$tty_name" | sed 's#^/dev/##; s#[^A-Za-z0-9_.-]#-#g')
+view="tview-${USER:-user}-$key"
+if [[ "$primary" != 0 ]]; then
+  primary_key=$(printf '%s' "${primary_id#\$}" | sed 's#[^A-Za-z0-9_.-]#-#g')
+  view="$view-s$primary_key"
+fi
+
+if target_tmux has-session -t "=$view" 2>/dev/null; then
+  row=$(target_tmux list-sessions -F '#{session_name}|#{session_group}' \
+    | awk -F'|' -v wanted="$view" '$1==wanted {print; exit}')
+  group=${row#*|}
+  [[ "$group" == "$primary_group" ]] || {
+    echo "tview: existing '$view' belongs to another session group" >&2
+    exit 1
+  }
+else
+  target_tmux new-session -d -t "=$primary" -s "$view"
+  target_tmux set-option -t "$view" destroy-unattached off
+fi
+
+target=$view
+if [[ -n "$resolved_window" ]]; then
+  target="$view:$resolved_window"
+elif (( inside_tmux )) && [[ "$current_socket" == "$target_socket" ]]; then
+  # Preserve the original behavior, including calls from another session
+  # group: enter the view on the window index from which tview was invoked.
+  target="$view:$client_window"
+fi
+
+if (( inside_tmux )); then
+  if [[ "$current_socket" == "$target_socket" ]]; then
+    exec "$TMUX_BIN" switch-client -t "$target"
+  fi
+
+  # switch-client cannot cross tmux servers. Replace this terminal's current
+  # client with an attach to the selected fleet; no session is destroyed.
+  handoff=(env -u TMUX "$TMUX_BIN" -L "$target_server" attach-session -t "$target")
+  printf -v handoff_command '%q ' "${handoff[@]}"
+  exec "$TMUX_BIN" detach-client -E "$handoff_command"
+fi
+if [[ -n "$target_server" ]]; then
+  exec env -u TMUX "$TMUX_BIN" -L "$target_server" attach-session -t "$target"
+fi
+exec "$TMUX_BIN" attach-session -t "$target"

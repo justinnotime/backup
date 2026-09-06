@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROFILE="$HERE/lib/fleet-profile.py"
+
+if [[ "${1:-}" == "--config" ]]; then
+  (($# >= 3)) || { echo "usage: orc --config FILE <command> [...]" >&2; exit 2; }
+  export FLEET_ORCHESTRATOR_CONFIG="$2"
+  shift 2
+fi
+
+if [[ "${1:-}" == "fleet" ]]; then
+  (($# >= 2)) || {
+    echo "usage: orc fleet create|show|apply-tmux [...]" >&2
+    exit 2
+  }
+  action=$2
+  shift 2
+  case "$action" in
+    create)
+      exec python3 "$PROFILE" create "$@"
+      ;;
+    show)
+      exec python3 "$PROFILE" resolve "$@"
+      ;;
+    apply-tmux)
+      exec python3 "$PROFILE" apply-tmux "$@"
+      ;;
+    *)
+      echo "usage: orc fleet create|show|apply-tmux [...]" >&2
+      exit 2
+      ;;
+  esac
+fi
+
+if [[ "${1:-}" == "--fleet" ]]; then
+  (($# >= 3)) || { echo "usage: orc --fleet <name> <command> [...]" >&2; exit 2; }
+  fleet=$2
+  shift 2
+  exec python3 "$PROFILE" exec "$fleet" -- python3 "$HERE/fleet-orchestrator.py" "$@"
+fi
+
+if [[ -n "${NW_FLEET:-}" && "${NW_FLEET_PROFILE_APPLIED:-}" != "$NW_FLEET" ]]; then
+  exec python3 "$PROFILE" exec "$NW_FLEET" -- python3 "$HERE/fleet-orchestrator.py" "$@"
+fi
+
+exec python3 "$HERE/fleet-orchestrator.py" "$@"

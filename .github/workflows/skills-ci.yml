@@ -19,9 +19,29 @@ jobs:
             python: "3.14"
             check: Skill format
           - skill: fleet-orchestrator
-            kind: instruction
+            kind: python
+            python: "3.11"
+            check: Python 3.11
+          - skill: fleet-orchestrator
+            kind: python
             python: "3.14"
-            check: Skill format
+            check: Python 3.14
+          - skill: repository-publish
+            kind: python
+            python: "3.10"
+            check: Python 3.10
+          - skill: repository-publish
+            kind: python
+            python: "3.14"
+            check: Python 3.14
+          - skill: genteam
+            kind: python
+            python: "3.10"
+            check: Python 3.10
+          - skill: genteam
+            kind: python
+            python: "3.14"
+            check: Python 3.14
           - skill: google-docs-authority
             kind: python
             python: "3.10"
@@ -31,9 +51,13 @@ jobs:
             python: "3.14"
             check: Python 3.14
           - skill: structure-lint
-            kind: instruction
+            kind: python
+            python: "3.10"
+            check: Python 3.10
+          - skill: structure-lint
+            kind: python
             python: "3.14"
-            check: Skill format
+            check: Python 3.14
           - skill: chat-mentions
             kind: python
             python: "3.10"
@@ -55,9 +79,13 @@ jobs:
             python: "3.14"
             check: Skill format
           - skill: secret-lint
-            kind: instruction
+            kind: python
+            python: "3.10"
+            check: Python 3.10
+          - skill: secret-lint
+            kind: python
             python: "3.14"
-            check: Skill format
+            check: Python 3.14
           - skill: privacy-lint
             kind: instruction
             python: "3.14"
@@ -181,11 +209,13 @@ jobs:
           python-version: ${{ matrix.python }}
           enable-cache: false
       - name: Install test command dependencies
-        if: matrix.kind == 'shell' || matrix.skill == 'agent-session-extraction' || matrix.skill == 'happy-tmux-title'
+        if: matrix.kind == 'shell' || matrix.skill == 'agent-session-extraction' || matrix.skill == 'happy-tmux-title' || matrix.skill == 'fleet-orchestrator' || matrix.skill == 'repository-publish'
         run: |
           case "$SKILL" in
             agent-session-extraction) packages=(git-crypt) ;;
             happy-tmux-title) packages=(tmux) ;;
+            fleet-orchestrator) packages=(tmux jq iproute2 nodejs) ;;
+            repository-publish) packages=(git-lfs) ;;
             state-backup|agent-harness-profiles) packages=(rsync sqlite3) ;;
           esac
           sudo apt-get update -qq
@@ -215,6 +245,31 @@ jobs:
           uv run --no-sync ruff check src tests --select E9,F63,F7,F82
           uv run --no-sync ruff check src/agent_skills/sessions/scheduled.py tests/test_scheduled.py --select E4,E7,E9,F
           sh -n scripts/run
+      - name: Check complete fleet runtime
+        if: matrix.skill == 'fleet-orchestrator'
+        working-directory: ${{ runner.temp }}/skill-check/${{ matrix.skill }}
+        run: |
+          uv run --no-sync ruff check scripts tests --select E9,F63,F7,F82
+          uv run --no-sync skills-ref validate "$PWD"
+          bash tests/test-dispatch-ledger-guards.sh
+          bash tests/test-tview.sh
+          bash tests/test-tview-regression.sh
+          bash tests/test-fleet-staging.sh
+          bash tests/test-agent-boot-harness.sh
+          bash tests/test-agent-boot-restart-guard.sh
+          bash tests/test-agent-bus-cli.sh
+          bash tests/test-fleet-lint.sh
+          uv run --no-sync python scripts/merge-receipt.py --self-test
+          uv run --no-sync python scripts/pr-green-unreviewed.py --self-test
+          uv run --no-sync python scripts/pr-red-triage.py --self-test
+      - name: Check portable runtime packages
+        if: matrix.skill == 'repository-publish' || matrix.skill == 'secret-lint' || matrix.skill == 'structure-lint' || matrix.skill == 'genteam'
+        working-directory: ${{ runner.temp }}/skill-check/${{ matrix.skill }}
+        run: |
+          uv run --no-sync ruff check src tests --select E9,F63,F7,F82
+          if [[ "${{ matrix.python }}" != "3.10" ]]; then
+            uv run --no-sync skills-ref validate "$PWD"
+          fi
       - name: Lint Teams entry point
         if: matrix.skill == 'teams-archive'
         working-directory: ${{ runner.temp }}/skill-check/${{ matrix.skill }}

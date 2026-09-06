@@ -1,15 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "secret-lint-checks"
+name = "secret-lint-skill"
 version = "0.1.0"
-description = "Development checks for the secret-lint Skill"
-requires-python = ">=3.11"
+description = "Local credential candidate scanning and controlled text redaction"
+requires-python = ">=3.10"
 dependencies = []
 
-[dependency-groups]
-dev = ["skills-ref"]
+[project.scripts]
+secret-lint = "secret_lint:main"
 
-[tool.uv]
-package = false
+[dependency-groups]
+dev = ["pytest>=8,<10", "ruff>=0.12,<1", "skills-ref; python_version >= '3.11'"]
 
 [tool.uv.sources]
 skills-ref = { git = "https://github.com/agentskills/agentskills.git", rev = "69ef37e9424c0a7ea9dd2293b559e43ec8176379", subdirectory = "skills-ref" }
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = ["secret_lint"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100

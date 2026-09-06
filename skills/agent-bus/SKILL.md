@@ -1,20 +1,24 @@
 ---
 name: agent-bus
 description: >-
-  Operate a caller-configured agent coordination transport: join or resume a session, inspect membership and inbox state, or send an explicitly requested peer message. Use for Agent Bus onboarding, delivery checks, and same-host agent messaging. Requires an existing transport and caller-provided commands; this Skill supplies instructions, not a bus server or transport implementation.
+  Operate a caller-configured agent coordination transport: join or resume a session, inspect membership and inbox state, or send an explicitly requested peer message. Use for Agent Bus onboarding, delivery checks, and same-host agent messaging. Uses the public fleet-orchestrator runtime for durable local or explicitly configured Matrix transport.
 ---
 
 # Agent Bus
 
-This is an instruction package for an existing coordination transport. Read
-`AGENT_BUS_PROFILE`, or
-`${XDG_CONFIG_HOME:-$HOME/.config}/agent-bus/profile.md`, when present. The private
-profile supplies executable locations, transport selection, identity rules,
-harness integration and local operating policy. Commands explicitly provided
-by the user can also establish that context. If the backend or identity is
-unknown, report the missing information; do not invent a server, account or
-registration. No backend is bundled here.
+The complete transport implementation is maintained in the public
+`fleet-orchestrator` package, together with its shared identity and terminal
+runtime. Install that package's `scripts/install` to expose the `agent-bus`
+command, then use this workflow for messaging. This Skill invokes that public
+executable interface; it does not import another package's source or require a
+personal repository. `agent-bus --help` describes its commands; a leading
+`--config /private/config.json` selects runtime settings. Local mode requires
+no server or credentials. Matrix mode requires explicit endpoint and room settings.
 
+Read `AGENT_BUS_PROFILE`, or
+`${XDG_CONFIG_HOME:-$HOME/.config}/agent-bus/profile.md`, when present, for the
+caller's identity and operating policy. Resolve an existing identity before
+joining; installing the runtime does not authorize sending a message.
 Use the same explicitly selected fleet and transport throughout an operation.
 A failed named selection must not silently retry against a default fleet.
 Distinguish a local transport from a network transport; they may have different

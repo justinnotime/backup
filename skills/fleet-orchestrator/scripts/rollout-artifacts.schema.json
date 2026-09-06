@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:fleet-orchestrator:rollout:v1",
+  "title": "ORC rollout artifact manifest",
+  "type": "object",
+  "required": [
+    "$schema",
+    "schema",
+    "states",
+    "artifacts"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schema": {
+      "const": "orc-rollout/v1"
+    },
+    "states": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "ABSENT",
+          "STAGED",
+          "INSTALLED",
+          "ACTIVATION_REQUIRED",
+          "ACTIVE_UNVERIFIED",
+          "VERIFIED",
+          "BLOCKED_TRUST",
+          "DRIFTED",
+          "FAILED",
+          "UNKNOWN"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "class",
+          "harness",
+          "seat",
+          "activation",
+          "target_state",
+          "install"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "class": {
+            "enum": [
+              "reexec",
+              "published-file",
+              "skill-links",
+              "opencode-plugin",
+              "hooks",
+              "dsh-plugin",
+              "dsh-composition"
+            ]
+          },
+          "source": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "source_globs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "harness": {
+            "type": "string"
+          },
+          "harnesses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "seat": {
+            "type": "string"
+          },
+          "activation": {
+            "enum": [
+              "reexec",
+              "invocation",
+              "process-restart",
+              "profile-restart",
+              "immediate"
+            ]
+          },
+          "target_state": {
+            "type": "string"
+          },
+          "install": {
+            "enum": [
+              "merge-only",
+              "status-only",
+              "symlink-tree",
+              "copy-file",
+              "claude-json-hooks",
+              "codex-stage-hooks",
+              "dsh-profile-plugin"
+            ]
+          },
+          "target": {
+            "type": "string"
+          },
+          "target_roots": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "copy_source": {
+            "type": "string"
+          },
+          "observer": {
+            "type": "string"
+          },
+          "config": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "command": {
+            "type": "string"
+          },
+          "trust_required": {
+            "type": "boolean"
+          },
+          "package": {
+            "type": "string"
+          },
+          "required_row": {
+            "type": "string"
+          },
+          "cron_exact_line": {
+            "type": "string"
+          },
+          "observation_log": {
+            "type": "string"
+          },
+          "max_observation_age_s": {
+            "type": "integer"
+          },
+          "context_loading": {
+            "type": "string"
+          },
+          "source_roots": {
+            "type": "object",
+            "required": [
+              "working",
+              "canonical"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "working": {
+                "type": "string"
+              },
+              "canonical": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}
