@@ -49,6 +49,7 @@ Optional fields:
 | `watched_repositories` | List of objects containing `path`, `kind` (`checkout` or `bare-hub`), and optional `exempt` paths |
 | `watcher_exceptions_file`, `bus.watcher_exceptions` | Caller-approved watcher exceptions for task and transport inspection |
 | `turn_report.seats_file` | JSON enrollment list for mechanical turn reporting |
+| `seat_trailer` | Explicit ledger, member command, window vocabulary, host selector and Git trailer key; see [commit attribution](commit-attribution.md) |
 | `commands.brief` | Optional caller-owned startup briefing command |
 | `handoff.directory`, `handoff.publish_command` | Local handoff storage and optional external publication |
 | `rollout.manifest`, `rollout.source_root`, `rollout.canonical_root`, `rollout.skill_sources` | Artifact manifest, source checkouts, and explicit Skill-name-to-directory mapping |

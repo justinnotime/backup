@@ -7,7 +7,9 @@ description: >-
 # Fleet orchestration
 
 This package includes the ORC engine, its SQLite store, durable Agent Bus,
-terminal helpers, harness hooks, and installation checks. It runs independently
+terminal helpers, harness hooks, and installation checks. For optional Git
+participant trailers, use the configured
+[commit attribution helper](references/commit-attribution.md). It runs independently
 of any personal notes repository. See [runtime commands](references/runtime.md)
 for installation and [configuration](references/configuration.md) for optional
 transport, paths, and private policy. All runtime commands make zero LLM calls.
