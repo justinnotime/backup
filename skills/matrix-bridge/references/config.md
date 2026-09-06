@@ -4,24 +4,24 @@ The runtime needs Python 3.10 or newer on a Unix-like host; it uses only the
 standard library. Tests and lint dependencies belong to this package:
 
 ```bash
-uv sync --project /path/to/phone-bridge --locked
-(cd /path/to/phone-bridge && uv run --no-sync pytest tests)
+uv sync --project /path/to/matrix-bridge --locked
+(cd /path/to/matrix-bridge && uv run --no-sync pytest tests)
 ```
 
-Commands use `--config PATH`, then `PHONE_BRIDGE_CONFIG`, then
-`$XDG_CONFIG_HOME/phone-bridge/config.json` (defaulting to
-`$HOME/.config/phone-bridge/config.json`). Keep real configuration and credentials
+Commands use `--config PATH`, then `MATRIX_BRIDGE_CONFIG`, then
+`$XDG_CONFIG_HOME/matrix-bridge/config.json` (defaulting to
+`$HOME/.config/matrix-bridge/config.json`). Keep real configuration and credentials
 outside this public package.
 
 ```json
 {
-  "schema": "phone-bridge/v1",
+  "schema": "matrix-bridge/v1",
   "homeserver": "https://matrix.example.invalid",
   "room_id": "!transfer:example.invalid",
   "user_id": "@sender:example.invalid",
   "auth_file": "~/.config/example-matrix/auth.hdr",
-  "state_file": "~/.local/state/phone-bridge/since",
-  "inbox_dir": "~/.cache/phone-bridge/inbox",
+  "state_file": "~/.local/state/matrix-bridge/since",
+  "inbox_dir": "~/.cache/matrix-bridge/inbox",
   "max_file_bytes": 52428800,
   "timeline_limit": 100
 }
@@ -49,6 +49,18 @@ the cursor. Increase the configured limit if appropriate, or recover the gap
 with a full Matrix client. This small transfer tool does not backfill history.
 
 ## Existing command compatibility
+
+This package was renamed from `phone-bridge` to `matrix-bridge`. Install the
+renamed directory and update the Skill link and any command paths. Remove the
+old Skill link to avoid discovering the same capability twice.
+
+Existing private files still work: `PHONE_BRIDGE_CONFIG` is accepted after
+`MATRIX_BRIDGE_CONFIG`, and the old `phone-bridge/config.json` location is read
+only when the new default path is absent. An invalid new configuration fails
+instead of selecting an older destination. The legacy `phone-bridge/v1` schema
+retains its original default state and download directories. When changing its
+schema to `matrix-bridge/v1`, set `state_file` and `inbox_dir` explicitly to their
+existing paths first. Renaming must not create a new receive cursor.
 
 Both executable names remain `mx-send` and `mx-recv`. Without `--text` or `--file`,
 `mx-send` uploads when every argument names an existing local path; otherwise it

@@ -1,9 +1,12 @@
 ---
-name: phone-bridge
-description: Send text, images, or files to a phone, or receive transfers from it, through one privately configured Matrix room. Use when the user asks to transfer material between this machine and their phone. Requires an existing account and an unencrypted room; does not send to arbitrary contacts or configure a Matrix server.
+name: matrix-bridge
+description: Send and receive text, images, or files through one privately configured Matrix room. Use for Matrix room transfers, including moving material between this machine and a phone or another Matrix client. Requires an existing account and an unencrypted room; does not configure a Matrix server or connect other chat networks.
 ---
 
-# Phone bridge
+# Matrix Bridge
+
+Transfer content through a configured Matrix room. A phone running a Matrix
+client is one possible endpoint; the commands work with other Matrix clients too.
 
 Use the package's `mx-send` and `mx-recv` commands from any directory. Resolve
 this installed Skill's directory to find them; neither command needs a sibling
@@ -15,11 +18,11 @@ when installing, relocating, or diagnosing the bridge. Missing configuration
 is a setup problem; do not guess a room or reuse another channel.
 
 ```bash
-/path/to/phone-bridge/mx-recv --doctor
-/path/to/phone-bridge/mx-send --text "message requested by the user"
-/path/to/phone-bridge/mx-send --file /path/to/image.png /path/to/report.pdf
-/path/to/phone-bridge/mx-recv
-/path/to/phone-bridge/mx-recv --wait
+/path/to/matrix-bridge/mx-recv --doctor
+/path/to/matrix-bridge/mx-send --text "message requested by the user"
+/path/to/matrix-bridge/mx-send --file /path/to/image.png /path/to/report.pdf
+/path/to/matrix-bridge/mx-recv
+/path/to/matrix-bridge/mx-recv --wait
 ```
 
 - Send only the material the user has authorized for the configured destination.

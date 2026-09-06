@@ -2,5 +2,5 @@
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
-from phone_bridge import recv_main
-raise SystemExit(recv_main())
+from matrix_bridge import send_main
+raise SystemExit(send_main())
