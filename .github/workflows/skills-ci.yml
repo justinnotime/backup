@@ -14,6 +14,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - skill: google-chat-archive
+            kind: python
+            python: "3.10"
+            check: Python 3.10
+          - skill: google-chat-archive
+            kind: python
+            python: "3.14"
+            check: Python 3.14
           - skill: matrix-bridge
             kind: python
             python: "3.10"
@@ -137,6 +145,12 @@ jobs:
         if: matrix.skill == 'matrix-bridge'
         working-directory: ${{ runner.temp }}/skill-check/${{ matrix.skill }}
         run: uv run --no-sync ruff check src tests mx-send mx-recv --select E4,E7,E9,F
+      - name: Lint Google Chat archive
+        if: matrix.skill == 'google-chat-archive'
+        working-directory: ${{ runner.temp }}/skill-check/${{ matrix.skill }}
+        run: |
+          uv run --no-sync ruff check src tests --select E4,E7,E9,F
+          sh -n scripts/sync
       - name: Check WhatsApp archive and bridge
         if: matrix.skill == 'whatsapp-archive'
         working-directory: ${{ runner.temp }}/skill-check/${{ matrix.skill }}

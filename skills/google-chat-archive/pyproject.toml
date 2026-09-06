@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "google-chat-archive-skill"
+version = "0.1.0"
+description = "Caller-configured Google Chat Markdown archive"
+requires-python = ">=3.10"
+dependencies = ["PyYAML>=6,<7"]
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "ruff>=0.16,<1"]
+
+[project.scripts]
+google-chat-archive = "google_chat_archive:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = ["google_chat_archive"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
