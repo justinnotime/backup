@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cross-ref-lint-skill"
+version = "0.1.0"
+description = "Check local Markdown links against filesystem targets"
+requires-python = ">=3.10"
+dependencies = ["markdown-it-py>=3,<5"]
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "ruff>=0.16,<1"]
+
+[project.scripts]
+cross-ref-check = "cross_ref_lint:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+py-modules = ["cross_ref_lint"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
