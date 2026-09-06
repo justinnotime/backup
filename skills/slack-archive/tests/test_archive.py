@@ -2,12 +2,22 @@ import copy
 import io
 import json
 from pathlib import Path
+import sys
 import urllib.error
 
 import pytest
 import yaml
 
 import slack_archive as a
+
+
+def publish_config(ar):
+    cfg = ar["settings"]["slack"]
+    cfg["publish"] = {"command": ["publisher", "{base_dir}", "{state_dir}", "--"],
+                      "base_env": "ARCHIVE_TEST_WORKTREE", "state_env": "ARCHIVE_TEST_STATE"}
+    cfg["workspaces"][0]["token_file"] = str(ar["root"] / "token")
+    ar["config"].write_text(yaml.safe_dump(ar["settings"]))
+    return cfg
 
 
 NOW = 2000000000
@@ -313,3 +323,99 @@ def test_message_body_cannot_forge_archive_identity(archive, forged_header):
 def test_legacy_body_marker_is_not_an_archived_record():
     content = '### 2033-05-18 03:33:19 — Reader\n<!-- id: 1999999999.000001 -->\n\nQuoted <!-- id: 2000000001.000001 -->\n'
     assert a.archived_ids(content) == {'1999999999.000001'}
+
+
+def test_publication_invokes_external_command_without_shell_and_propagates_failure(archive):
+    ar = archive
+    cfg = publish_config(ar)
+    record = ar["root"] / "invocation.json"
+    publisher = ar["root"] / "publisher script.py"
+    publisher.write_text("import json,sys\nfrom pathlib import Path\n"
+                         "Path(sys.argv[1]).write_text(json.dumps(sys.argv[2:]))\nraise SystemExit(23)\n")
+    literal = "$(unexpected-command)"
+    cfg["publish"]["command"] = [sys.executable, str(publisher), str(record), literal,
+                                  "{base_dir}", "{output_dir}", "{state_dir}", "{utc}", "--"]
+    ar["config"].write_text(yaml.safe_dump(ar["settings"]))
+    assert ar["run"]("--publish") == 23
+    args = json.loads(record.read_text())
+    assert args[:4] == [literal, str(ar["root"]), "archive", str(ar["root"] / "state")]
+    assert args[4].endswith("Z")
+    writer = args[6:]
+    assert writer[:3] == [sys.executable, "-B", str(Path(a.__file__).resolve())]
+    assert "--transaction-writer" in writer
+    assert not ar["calls"]
+    assert not (ar["root"] / "state").exists()
+
+
+@pytest.mark.parametrize("relative_token", [False, True])
+def test_transaction_writer_uses_staged_paths_and_retains_durable_progress(archive, monkeypatch, relative_token):
+    ar = archive
+    cfg = publish_config(ar)
+    if relative_token:
+        cfg["workspaces"][0]["token_file"] = "token"
+        ar["config"].write_text(yaml.safe_dump(ar["settings"]))
+    durable = ar["root"] / "state/slack.json"
+    durable.parent.mkdir()
+    durable.write_text('{"version":1,"channels":{}}\n')
+    before = durable.read_bytes()
+    worktree, staged = ar["root"] / "worktree", ar["root"] / "staged"
+    monkeypatch.setenv("ARCHIVE_TEST_WORKTREE", str(worktree))
+    monkeypatch.setenv("ARCHIVE_TEST_STATE", str(staged))
+    ar["raw"].append(message(f"{NOW - 1}.000001", "A staged record"))
+    assert ar["run"]("--transaction-writer") == 0
+    assert durable.read_bytes() == before
+    assert not (ar["root"] / "archive").exists()
+    assert "A staged record" in next((worktree / "archive").rglob("*.md")).read_text()
+    assert json.loads((staged / "slack.json").read_text())["channels"]["example/C1"]["scanned_before"]
+
+
+@pytest.mark.parametrize("argument", ["--publish", "--transaction-writer"])
+def test_publication_modes_refuse_dry_run_before_external_actions(archive, argument):
+    ar = archive
+    publish_config(ar)
+    before = files(ar)
+    assert ar["run"](argument, "--dry-run") == 1
+    assert files(ar) == before
+    assert not ar["calls"]
+
+
+@pytest.mark.parametrize("base,stage", [(None, None), ("relative", "/stage"), ("/worktree", "relative")])
+def test_transaction_writer_requires_publisher_directories(archive, monkeypatch, base, stage):
+    ar = archive
+    publish_config(ar)
+    for key, value in (("ARCHIVE_TEST_WORKTREE", base), ("ARCHIVE_TEST_STATE", stage)):
+        monkeypatch.delenv(key, raising=False)
+        if value is not None:
+            monkeypatch.setenv(key, value)
+    before = files(ar)
+    assert ar["run"]("--transaction-writer") == 1
+    assert files(ar) == before
+    assert not ar["calls"]
+
+
+def test_configured_base_and_credentials_support_direct_entry(archive):
+    ar = archive
+    cfg = ar["settings"]["slack"]
+    private = ar["root"] / "private"
+    private.mkdir()
+    token_dir = ar["root"] / "credentials"
+    token_dir.mkdir()
+    (token_dir / "slack-token-example").write_text("synthetic-credential")
+    cfg["base_dir"] = ".."
+    cfg["token_dir"] = "credentials"
+    cfg["workspaces"][0].pop("token_file")
+    path = private / "settings.yaml"
+    path.write_text(yaml.safe_dump(ar["settings"]))
+    assert a.main(["--config", str(path)]) == 0
+    assert (ar["root"] / "state/slack.json").exists()
+
+
+def test_relative_cli_base_keeps_working_directory_semantics(archive, monkeypatch):
+    ar = archive
+    caller = ar["root"] / "caller"
+    selected = caller / "selected"
+    selected.mkdir(parents=True)
+    (selected / "token").write_text("synthetic-credential")
+    monkeypatch.chdir(caller)
+    assert ar["run"]("--base-dir", "selected") == 0
+    assert (selected / "state/slack.json").exists()

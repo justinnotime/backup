@@ -5,7 +5,9 @@ contains the following fields:
 
 | Field | Meaning |
 | --- | --- |
-| `output_dir`, `state_file` | Required archive directory and state file; overridden by `--output-dir` and `--state-file`. Relative paths use `--base-dir`, or the config file's directory when omitted. |
+| `base_dir` | Path base, relative to the configuration directory if not absolute. Defaults to that directory. `--base-dir` overrides it; a relative CLI value uses the invoking working directory, retaining the original CLI behavior. |
+| `output_dir`, `state_file` | Required archive directory and state file; overridden by `--output-dir` and `--state-file`. Relative paths use the selected base directory. |
+| `token_dir` | Optional credential directory, overridden by `--token-dir`. Each workspace's explicit `token_file` takes precedence. |
 | `enabled` | Explicit `false` disables sync. Defaults to enabled. |
 | `workspaces` | List of mappings with distinct caller-chosen `name` and explicit `token_file`. |
 | `mode`, `chats` | Inherited selection defaults: `whitelist` with an empty list selects nothing; `blacklist` with an empty list selects every visible active conversation. Entries are substrings or `{match, alias}` mappings. |
@@ -50,3 +52,55 @@ Each run is read-only against Slack. List/peek and dry runs never save local
 progress. Sync saves state atomically only after every selected workspace and
 conversation succeeds. A transactional publisher must separately stage that
 state and promote it only after its archive publication succeeds.
+
+## Direct scheduler entry with a private publisher
+
+Run `scripts/sync --config /path/to/private/config.yaml --publish` when the
+private configuration provides `slack.publish`. Ordinary reads, inspection,
+and dry runs do not invoke a publisher. Publication and dry-run modes cannot
+be combined.
+
+`publish.command` is a nonempty argument array for an external publisher.
+The package appends its own writer command, using the current Python interpreter
+and package source. The publisher must execute that appended command in an
+isolated worktree with a staged copy of durable state, and promote state only
+after successful publication. `publish.base_env` and `publish.state_env` name
+the environment variables through which the publisher supplies those two
+absolute directories. The appended `--transaction-writer` invocation fails if
+either directory is missing. The configured output must be a subdirectory of
+`base_dir`; its relative path and state filename are preserved in staging.
+Relative credential paths retain the original configuration base when archive
+and progress paths move into the temporary worktree.
+
+The prefix supports literal replacements `{base_dir}`, `{output_dir}` (relative
+to the repository), `{state_dir}` (durable state's parent), and `{utc}` (UTC
+invocation time). Argument values are passed without shell evaluation. For a
+publisher whose documented interface accepts the following options, a private
+configuration could contain:
+
+```yaml
+slack:
+  base_dir: /path/to/private/repository
+  output_dir: archive/slack
+  state_file: /path/to/private/state/slack.json
+  token_dir: /path/to/private/credentials
+  # Include the ordinary workspace selection above.
+  publish:
+    command:
+      - /path/to/transaction-publisher
+      - --repository
+      - '{base_dir}'
+      - --state-directory
+      - '{state_dir}'
+      - --message
+      - 'Archive Slack messages {utc}'
+      - --
+    base_env: ARCHIVE_WORKTREE
+    state_env: ARCHIVE_STAGED_STATE
+```
+
+The external command's arguments and environment-variable contract are supplied
+by the consumer; the example is not a bundled publisher. Locks, Git policy,
+credentials, and schedules remain private. The publisher's exit status reaches
+the scheduler unchanged. Configure the scheduler's interpreter/PATH for the
+installed package dependencies, just as for an ordinary `scripts/sync` run.

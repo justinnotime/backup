@@ -17,6 +17,11 @@ scripts/sync --config /path/to/private/config.yaml --dry-run
 scripts/sync --config /path/to/private/config.yaml
 ```
 
+For a configured Git consumer, the scheduler can call this same public entry
+with `--publish`. The private `publish.command` selects the existing
+transactional publisher; no private forwarding script is needed. Read the
+publication section of the configuration reference before configuring it.
+
 Use `--list-channels` to inspect available conversation identities. Use
 `--peek MATCH --peek-limit 30` for recent messages; ambiguous matches fail.
 An exact conversation ID or `workspace/ID` selects one conversation.
@@ -42,5 +47,6 @@ promote state only after publication succeeds. Earlier output files may remain
 after a standalone failure; retries deduplicate their message IDs.
 
 Run package tests with `uv run --locked pytest tests`. Tests require synthetic
-inputs only. This package does not schedule jobs, commit, push, or read another
-Skill's source files.
+inputs only. This package does not install schedules or implement Git publication;
+`--publish` explicitly invokes the configured external publisher. It never reads
+another Skill's source files.
