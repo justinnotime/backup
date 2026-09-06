@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+SKILL_ROOT=$(cd -P "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+PYTHON=${WHATSAPP_ARCHIVE_PYTHON:-"$SKILL_ROOT/.venv/bin/python"}
+if [[ ! -x "$PYTHON" ]]; then
+  PYTHON=python3
+fi
+exec "$PYTHON" -B "$SKILL_ROOT/src/whatsapp_archive.py" "$@"
