@@ -471,6 +471,8 @@ def main(argv=None):
         _last_request = 0.0
         if DRY_RUN and (args.publish or args.transaction_writer):
             raise ArchiveError("dry-run cannot be combined with publication modes")
+        # Credentials keep their configured base when output is relocated.
+        wss = workspaces(cfg, base, token_dir)
         if args.transaction_writer:
             settings = publication_settings(cfg)
             relative = publication_output(base)
@@ -481,7 +483,6 @@ def main(argv=None):
             base = Path(staged_base).resolve()
             OUTPUT_DIR = base / relative
             STATE_FILE = Path(staged_state) / STATE_FILE.name
-        wss = workspaces(cfg, base, token_dir)
         if cfg.get("enabled", True) is False:
             log("slack: disabled by configuration")
         elif args.publish:

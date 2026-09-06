@@ -347,9 +347,13 @@ def test_publication_invokes_external_command_without_shell_and_propagates_failu
     assert not (ar["root"] / "state").exists()
 
 
-def test_transaction_writer_uses_staged_paths_and_retains_durable_progress(archive, monkeypatch):
+@pytest.mark.parametrize("relative_token", [False, True])
+def test_transaction_writer_uses_staged_paths_and_retains_durable_progress(archive, monkeypatch, relative_token):
     ar = archive
-    publish_config(ar)
+    cfg = publish_config(ar)
+    if relative_token:
+        cfg["workspaces"][0]["token_file"] = "token"
+        ar["config"].write_text(yaml.safe_dump(ar["settings"]))
     durable = ar["root"] / "state/slack.json"
     durable.parent.mkdir()
     durable.write_text('{"version":1,"channels":{}}\n')

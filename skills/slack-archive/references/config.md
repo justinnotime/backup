@@ -69,6 +69,8 @@ the environment variables through which the publisher supplies those two
 absolute directories. The appended `--transaction-writer` invocation fails if
 either directory is missing. The configured output must be a subdirectory of
 `base_dir`; its relative path and state filename are preserved in staging.
+Relative credential paths retain the original configuration base when archive
+and progress paths move into the temporary worktree.
 
 The prefix supports literal replacements `{base_dir}`, `{output_dir}` (relative
 to the repository), `{state_dir}` (durable state's parent), and `{utc}` (UTC
