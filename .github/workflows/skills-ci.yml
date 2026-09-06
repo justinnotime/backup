@@ -14,6 +14,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - skill: pr-status-table
+            kind: instruction
+            python: "3.14"
+            check: Skill format
+          - skill: realign
+            kind: instruction
+            python: "3.14"
+            check: Skill format
+          - skill: draft-human-reply
+            kind: instruction
+            python: "3.14"
+            check: Skill format
           - skill: cross-ref-lint
             kind: python
             python: "3.10"
@@ -114,7 +126,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/skill-check"
           cp -a "$GITHUB_WORKSPACE/skills/$SKILL" "$RUNNER_TEMP/skill-check/$SKILL"
       - name: Set up uv and Python
-        if: matrix.kind == 'python'
+        if: matrix.kind == 'python' || matrix.kind == 'instruction'
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: "0.11.30"
@@ -136,6 +148,10 @@ jobs:
         run: |
           uv sync --locked --all-extras
           uv run --no-sync pytest tests -q -rs
+      - name: Validate instruction-only Skill
+        if: matrix.kind == 'instruction'
+        working-directory: ${{ runner.temp }}/skill-check/${{ matrix.skill }}
+        run: uv run --locked skills-ref validate "$PWD"
       - name: Run shell package tests
         if: matrix.kind == 'shell'
         working-directory: ${{ runner.temp }}/skill-check/${{ matrix.skill }}
