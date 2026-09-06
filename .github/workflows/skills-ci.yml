@@ -74,6 +74,14 @@ jobs:
             kind: python
             python: "3.14"
             check: Python 3.14
+          - skill: activity-summary
+            kind: python
+            python: "3.10"
+            check: Python 3.10
+          - skill: activity-summary
+            kind: python
+            python: "3.14"
+            check: Python 3.14
           - skill: structure-lint
             kind: python
             python: "3.10"
@@ -324,7 +332,7 @@ jobs:
             uv run --no-sync agentskills validate "$PWD"
           fi
       - name: Lint content pipelines
-        if: matrix.skill == 'prompt-translation' || matrix.skill == 'document-facts'
+        if: matrix.skill == 'prompt-translation' || matrix.skill == 'document-facts' || matrix.skill == 'activity-summary'
         working-directory: ${{ runner.temp }}/skill-check/${{ matrix.skill }}
         run: |
           uv run --no-sync ruff check .
@@ -332,7 +340,19 @@ jobs:
           case "$SKILL" in
             prompt-translation) sh -n scripts/translate scripts/validate scripts/run ;;
             document-facts) sh -n scripts/extract ;;
+            activity-summary) sh -n scripts/extract-facts scripts/render-issue-section scripts/eval-facts scripts/validate-daily scripts/validate-weekly scripts/run-daily scripts/run-weekly ;;
           esac
+          if [[ "${{ matrix.python }}" != "3.10" ]]; then
+            uv run --no-sync agentskills validate "$PWD"
+          fi
+      - name: Lint GitHub graph tools
+        if: matrix.skill == 'github-archive'
+        working-directory: ${{ runner.temp }}/skill-check/${{ matrix.skill }}
+        run: |
+          uv run --no-sync ruff check src/issue_graph.py tests/test_graph.py
+          uv run --no-sync ruff format --check src/issue_graph.py tests/test_graph.py
+          bash -n scripts/sync
+          sh -n scripts/graph
           if [[ "${{ matrix.python }}" != "3.10" ]]; then
             uv run --no-sync agentskills validate "$PWD"
           fi

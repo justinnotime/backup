@@ -49,7 +49,7 @@ reusing that name removes the redirect.
 | `clip.sh` | Stable compatibility link for the clipboard shell helper |
 | `skills/agent-harness-profiles/` | Configuration-driven launcher and Skill-link setup |
 | `skills/agent-session-extraction/` | Manifest-driven extraction Skill and command wrappers |
-| `skills/github-archive/` | Caller-configured GitHub issue, pull-request, and comment archive |
+| `skills/github-archive/` | Configured GitHub archives with local issue dependency graphs, timelines and inventories |
 | `skills/teams-archive/` | Caller-configured Teams chat, card, and attachment archive |
 | `skills/whatsapp-archive/` | Receive-only WhatsApp linked-device spool and selected monthly archives |
 | `skills/slack-archive/` | Caller-configured Slack conversation archive, including late thread replies |
@@ -72,6 +72,7 @@ reusing that name removes the redirect.
 | `skills/genspark-archive/` | Configured Outlook email, calendar and meeting archives through the Genspark CLI |
 | `skills/prompt-translation/` | Incremental Chinese-to-English prompt learning, provenance validation and scheduled publication |
 | `skills/document-facts/` | Structured document facts, digests, timelines and thematic synthesis from configured sources |
+| `skills/activity-summary/` | Configured daily and weekly summaries with deterministic evidence, validation and scheduled publication |
 | `skills/structure-lint/` | Runnable repository structure checks with caller-owned metadata, layout and reference rules |
 | `skills/chat-draft/` | Targeted chat reading and reply drafting through configured readers |
 | `skills/agent-session-extraction/src/agent_skills/sessions/` | Package-owned normalized-session runtime |
@@ -223,6 +224,7 @@ or shared source directory. Run additional checks from the affected package:
 (cd skills/genspark-archive && uv run --locked pytest tests)
 (cd skills/prompt-translation && uv run --locked pytest tests)
 (cd skills/document-facts && uv run --locked pytest tests)
+(cd skills/activity-summary && uv run --locked pytest tests)
 (cd skills/structure-lint && uv run --locked pytest tests)
 (cd skills/chat-draft && uv run --locked skills-ref validate "$PWD")
 (cd skills/slack-archive && uv run --locked pytest tests)

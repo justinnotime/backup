@@ -1,0 +1,208 @@
+{
+  "schema": "activity-summary/v1",
+  "repository_root": "$HOME/data/example-archive",
+  "facts": {
+    "issue_directory": "sources/issues",
+    "default_issue_repository": "example-org/sample",
+    "document_directory": "sources/documents",
+    "wiki_project_directory": "knowledge/projects",
+    "summary_directory": "summaries",
+    "commit_directories": [
+      "sources",
+      "knowledge"
+    ],
+    "project_patterns": [
+      "(?:sources|knowledge)/projects?/([^/]+)/"
+    ],
+    "source_project_labels": [
+      [
+        "sources/mail",
+        "mail"
+      ]
+    ],
+    "session_sources": [
+      {
+        "directory": "sources/sessions",
+        "label": "sessions",
+        "format": "history"
+      }
+    ],
+    "gap_minutes": 45
+  },
+  "publisher_command": [
+    "$HOME/src/public-skills/skills/repository-publish/scripts/publish"
+  ],
+  "environment": {},
+  "daily": {
+    "output_directory": "summaries",
+    "prompt_template": "$HOME/.config/activity-summary/daily-prompt.txt",
+    "validation": {},
+    "schedule": {
+      "worktree": "$HOME/.cache/activity-summary/daily",
+      "task_branch": "summary-daily",
+      "lock": "$HOME/.cache/activity-summary/daily.lock",
+      "model_command": [
+        "$HOME/.local/bin/claude",
+        "-p",
+        "--safe-mode",
+        "--no-session-persistence",
+        "--model",
+        "your-model",
+        "--fallback-model",
+        "your-fallback-model",
+        "--effort",
+        "high",
+        "--permission-mode",
+        "dontAsk",
+        "--tools",
+        "Read,Grep,Glob",
+        "--max-budget-usd",
+        "0.10",
+        "--output-format",
+        "json",
+        "--json-schema",
+        "{\"type\":\"object\",\"properties\":{\"markdown\":{\"type\":\"string\"}},\"required\":[\"markdown\"],\"additionalProperties\":false}"
+      ],
+      "auth_command": [
+        "$HOME/.local/bin/claude",
+        "auth",
+        "status"
+      ],
+      "environment": {
+        "HOME": "$HOME",
+        "PATH": "$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin",
+        "LANG": "C.UTF-8"
+      },
+      "timeout_seconds": 2700,
+      "publication": {
+        "remote": "origin",
+        "branch": "main",
+        "owned_paths": [
+          "summaries"
+        ],
+        "subject": "update: daily activity summary",
+        "agent": "configured-writer",
+        "publish_lock": "$HOME/.cache/activity-summary/publish.lock"
+      },
+      "policy": {
+        "validate_command": [
+          "$HOME/.config/activity-summary/policy",
+          "validate",
+          "{worktree}",
+          "{scope}",
+          "{kind}"
+        ],
+        "commit_command": [
+          "$HOME/.config/activity-summary/policy",
+          "commit",
+          "{worktree}",
+          "{scope}",
+          "{kind}"
+        ],
+        "message_command": [
+          "$HOME/.config/activity-summary/policy",
+          "message",
+          "{worktree}",
+          "{scope}",
+          "{kind}"
+        ],
+        "recover_command": [
+          "$HOME/.config/activity-summary/policy",
+          "recover",
+          "{worktree}",
+          "{scope}",
+          "{kind}"
+        ]
+      }
+    },
+    "selection": {
+      "lookback_days": 14,
+      "repair_days": 3,
+      "max_dates": 3
+    }
+  },
+  "weekly": {
+    "output_directory": "summaries/weekly",
+    "prompt_template": "$HOME/.config/activity-summary/weekly-prompt.txt",
+    "validation": {},
+    "schedule": {
+      "worktree": "$HOME/.cache/activity-summary/weekly",
+      "task_branch": "summary-weekly",
+      "lock": "$HOME/.cache/activity-summary/weekly.lock",
+      "model_command": [
+        "$HOME/.local/bin/claude",
+        "-p",
+        "--safe-mode",
+        "--no-session-persistence",
+        "--model",
+        "your-model",
+        "--fallback-model",
+        "your-fallback-model",
+        "--effort",
+        "high",
+        "--permission-mode",
+        "dontAsk",
+        "--tools",
+        "Read,Grep,Glob",
+        "--max-budget-usd",
+        "0.10",
+        "--output-format",
+        "json",
+        "--json-schema",
+        "{\"type\":\"object\",\"properties\":{\"markdown\":{\"type\":\"string\"}},\"required\":[\"markdown\"],\"additionalProperties\":false}"
+      ],
+      "auth_command": [
+        "$HOME/.local/bin/claude",
+        "auth",
+        "status"
+      ],
+      "environment": {
+        "HOME": "$HOME",
+        "PATH": "$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin",
+        "LANG": "C.UTF-8"
+      },
+      "timeout_seconds": 2700,
+      "publication": {
+        "remote": "origin",
+        "branch": "main",
+        "owned_paths": [
+          "summaries/weekly"
+        ],
+        "subject": "update: weekly activity summary",
+        "agent": "configured-writer",
+        "publish_lock": "$HOME/.cache/activity-summary/publish.lock"
+      },
+      "policy": {
+        "validate_command": [
+          "$HOME/.config/activity-summary/policy",
+          "validate",
+          "{worktree}",
+          "{scope}",
+          "{kind}"
+        ],
+        "commit_command": [
+          "$HOME/.config/activity-summary/policy",
+          "commit",
+          "{worktree}",
+          "{scope}",
+          "{kind}"
+        ],
+        "message_command": [
+          "$HOME/.config/activity-summary/policy",
+          "message",
+          "{worktree}",
+          "{scope}",
+          "{kind}"
+        ],
+        "recover_command": [
+          "$HOME/.config/activity-summary/policy",
+          "recover",
+          "{worktree}",
+          "{scope}",
+          "{kind}"
+        ]
+      }
+    },
+    "wait_inputs_seconds": 1500
+  }
+}
