@@ -1,0 +1,24 @@
+[project]
+name = "runtime-layout"
+version = "0.1.0"
+description = "Configured runtime paths and explicit, resumable local layout migration"
+requires-python = ">=3.10"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest", "ruff", "skills-ref; python_version >= '3.11'"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+skills-ref = { git = "https://github.com/agentskills/agentskills.git", rev = "69ef37e9424c0a7ea9dd2293b559e43ec8176379", subdirectory = "skills-ref" }
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

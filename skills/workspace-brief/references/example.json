@@ -1,0 +1,31 @@
+{
+  "schema_version": "workspace-brief/v1",
+  "repository_root": "~/work/example-workspace",
+  "header": ["Workspace context", ""],
+  "projects": {
+    "directory": "Projects",
+    "heading": "Recent projects ({shown}/{total})",
+    "exclude_status_prefixes": ["archived", "paused"],
+    "limit": 3
+  },
+  "latest": {
+    "directory": "Threads",
+    "heading": "Latest thread",
+    "exclude": ["ORIGIN.md"]
+  },
+  "health": {
+    "heading": "Local writer checks",
+    "logs": [{"name": "example-writer", "paths": ["$HOME/.local/state/example/writer.log"], "cadence_minutes": 60}],
+    "overdue_line": "Delayed {name}: {age_minutes} minutes since activity",
+    "healthy_line": "Observed logs are within their expected interval",
+    "artifacts": [{"period": "daily", "path": "Reports/{date}.md", "ready_hour_utc": 3, "missing_line": "Missing {path}"}]
+  },
+  "worktrees": {
+    "idle_days": 2,
+    "budget_seconds": 2,
+    "base_ref": "main",
+    "line": "{name}: {idle_days} days old, {dirty} changed paths, {ahead} unmerged commits"
+  },
+  "after_health": [""],
+  "footer": ["Workspace: @root@"]
+}

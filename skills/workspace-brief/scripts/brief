@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+package=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$package/src${PYTHONPATH:+:$PYTHONPATH}" \
+  exec "${WORKSPACE_BRIEF_PYTHON:-python3}" -B -m workspace_brief.brief "$@"

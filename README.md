@@ -74,6 +74,9 @@ reusing that name removes the redirect.
 | `skills/document-facts/` | Structured document facts, digests, timelines and thematic synthesis from configured sources |
 | `skills/activity-summary/` | Configured daily and weekly summaries with deterministic evidence, validation and scheduled publication |
 | `skills/markdown-issues/` | Configured local Markdown issue creation, history validation, due reviews and watched-path signals |
+| `skills/runtime-install/` | Configured Skill discovery links and managed cron installation with preview and preservation of unrelated entries |
+| `skills/runtime-layout/` | Configured runtime path resolution and explicit local layout migration plans |
+| `skills/workspace-brief/` | Read-only workspace briefings from selected local records, checks and configured commands |
 | `skills/structure-lint/` | Runnable repository structure checks with caller-owned metadata, layout and reference rules |
 | `skills/chat-draft/` | Targeted chat reading and reply drafting through configured readers |
 | `skills/agent-session-extraction/src/agent_skills/sessions/` | Package-owned normalized-session runtime |
@@ -227,6 +230,9 @@ or shared source directory. Run additional checks from the affected package:
 (cd skills/document-facts && uv run --locked pytest tests)
 (cd skills/activity-summary && uv run --locked pytest tests)
 (cd skills/markdown-issues && uv run --locked pytest tests)
+(cd skills/runtime-install && uv run --locked pytest tests)
+(cd skills/runtime-layout && uv run --locked pytest tests)
+(cd skills/workspace-brief && uv run --locked pytest tests)
 (cd skills/structure-lint && uv run --locked pytest tests)
 (cd skills/chat-draft && uv run --locked skills-ref validate "$PWD")
 (cd skills/slack-archive && uv run --locked pytest tests)
