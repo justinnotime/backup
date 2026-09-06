@@ -56,6 +56,7 @@ reusing that name removes the redirect.
 | `skills/matrix-bridge/` | Text and file transfer through a privately configured Matrix room |
 | `skills/google-chat-archive/` | Caller-configured Google Chat space and direct-message archive |
 | `skills/happy-tmux-title/` | Exact tmux window lookup for Happy conversation titles |
+| `skills/cross-ref-lint/` | Local Markdown link validation with caller-owned exclusions |
 | `skills/agent-session-extraction/src/agent_skills/sessions/` | Package-owned normalized-session runtime |
 | `skills/<name>/tests/` | Tests owned and runnable by that Skill |
 
@@ -189,6 +190,7 @@ or shared source directory. Run additional checks from the affected package:
 (cd skills/matrix-bridge && uv run --locked pytest tests)
 (cd skills/google-chat-archive && uv run --locked pytest tests)
 (cd skills/happy-tmux-title && uv run --locked pytest tests) # requires tmux
+(cd skills/cross-ref-lint && uv run --locked pytest tests)
 (cd skills/slack-archive && uv run --locked pytest tests)
 (cd skills/whatsapp-archive && uv run --locked pytest tests && npm ci --prefix bridge && npm test --prefix bridge)
 ```

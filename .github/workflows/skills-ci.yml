@@ -14,6 +14,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - skill: cross-ref-lint
+            kind: python
+            python: "3.10"
+            check: Python 3.10
+          - skill: cross-ref-lint
+            kind: python
+            python: "3.14"
+            check: Python 3.14
           - skill: happy-tmux-title
             kind: python
             python: "3.10"
@@ -166,6 +174,12 @@ jobs:
         run: |
           uv run --no-sync ruff check src tests --select E4,E7,E9,F
           sh -n scripts/window-index
+      - name: Lint cross-reference checker
+        if: matrix.skill == 'cross-ref-lint'
+        working-directory: ${{ runner.temp }}/skill-check/${{ matrix.skill }}
+        run: |
+          uv run --no-sync ruff check src tests --select E4,E7,E9,F
+          sh -n scripts/check
       - name: Check WhatsApp archive and bridge
         if: matrix.skill == 'whatsapp-archive'
         working-directory: ${{ runner.temp }}/skill-check/${{ matrix.skill }}
