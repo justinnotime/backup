@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import urllib.error
@@ -376,6 +377,55 @@ def cmd_peek(wss, match, limit):
         log(f"### {message['ts']} — {message['sender']}\n{message['body']}\n")
 
 
+def publication_settings(cfg):
+    settings = cfg.get("publish")
+    if not isinstance(settings, dict):
+        raise ArchiveError("publish configuration is required")
+    command = settings.get("command")
+    if not isinstance(command, list) or not command or any(
+        not isinstance(value, str) or not value or "\x00" in value for value in command
+    ):
+        raise ArchiveError("publish.command must be a nonempty argument array")
+    for key in ("base_env", "state_env"):
+        if not isinstance(settings.get(key), str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", settings[key]):
+            raise ArchiveError("publish requires base_env and state_env variable names")
+    if settings["base_env"] == settings["state_env"]:
+        raise ArchiveError("publication worktree and state variables must differ")
+    return settings
+
+
+def publication_output(base):
+    try:
+        relative = OUTPUT_DIR.resolve().relative_to(base.resolve())
+    except ValueError:
+        raise ArchiveError("publication output must be inside base_dir") from None
+    if relative == Path("."):
+        raise ArchiveError("publication output must be a subdirectory of base_dir")
+    return relative
+
+
+def cmd_publish(cfg, config_path, base, token_dir):
+    settings = publication_settings(cfg)
+    relative = publication_output(base)
+    values = {"base_dir": str(base), "output_dir": str(relative),
+              "state_dir": str(STATE_FILE.parent),
+              "utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    command = []
+    for argument in settings["command"]:
+        for key, value in values.items():
+            argument = argument.replace("{" + key + "}", value)
+        command.append(argument)
+    # The configured publisher appends its writer command to this prefix. It
+    # owns locks, isolated output, staged state, and publication failure policy.
+    command += [sys.executable, "-B", str(Path(__file__).resolve()),
+                "--config", str(config_path), "--base-dir", str(base),
+                "--output-dir", str(relative), "--state-file", str(STATE_FILE),
+                "--transaction-writer"]
+    if token_dir:
+        command += ["--token-dir", str(token_dir)]
+    return subprocess.run(command, check=False).returncode
+
+
 def main(argv=None):
     global OUTPUT_DIR, STATE_FILE, DRY_RUN, RATE_DELAY, PAGE_LIMIT, _last_request
     parser = argparse.ArgumentParser(description=__doc__)
@@ -388,6 +438,8 @@ def main(argv=None):
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--list-channels", action="store_true")
     modes.add_argument("--peek", metavar="MATCH")
+    modes.add_argument("--publish", action="store_true", help="run the configured transactional publisher")
+    modes.add_argument("--transaction-writer", action="store_true", help="write into the publisher's worktree and staged state")
     parser.add_argument("--peek-limit", type=int, default=30)
     args = parser.parse_args(argv)
     try:
@@ -396,7 +448,9 @@ def main(argv=None):
         if not isinstance(settings, dict) or not isinstance(settings.get("slack"), dict):
             raise ArchiveError("configuration requires a slack mapping")
         cfg = settings["slack"]
-        base = Path(args.base_dir).expanduser().resolve() if args.base_dir else config_path.parent
+        base_value = args.base_dir or cfg.get("base_dir")
+        base = Path(base_value).expanduser() if base_value else config_path.parent
+        base = (base if base.is_absolute() else config_path.parent / base).resolve()
         def path(value, label):
             if not isinstance(value, str) or not value:
                 raise ArchiveError(f"{label} is required")
@@ -404,15 +458,31 @@ def main(argv=None):
             return p if p.is_absolute() else base / p
         OUTPUT_DIR = path(args.output_dir or cfg.get("output_dir"), "output_dir")
         STATE_FILE = path(args.state_file or cfg.get("state_file"), "state_file")
+        token_value = args.token_dir or cfg.get("token_dir")
+        token_dir = path(token_value, "token_dir") if token_value else None
         DRY_RUN = args.dry_run
         RATE_DELAY = float(cfg.get("request_interval", 1.3))
         PAGE_LIMIT = cfg.get("page_size", 200)
         if not 0 <= RATE_DELAY <= 300 or not isinstance(PAGE_LIMIT, int) or isinstance(PAGE_LIMIT, bool) or not 1 <= PAGE_LIMIT <= 999 or args.peek_limit < 1:
             raise ArchiveError("invalid request interval, page size, or peek limit")
         _last_request = 0.0
-        wss = workspaces(cfg, base, args.token_dir)
+        if DRY_RUN and (args.publish or args.transaction_writer):
+            raise ArchiveError("dry-run cannot be combined with publication modes")
+        if args.transaction_writer:
+            settings = publication_settings(cfg)
+            relative = publication_output(base)
+            staged_base = os.environ.get(settings["base_env"], "")
+            staged_state = os.environ.get(settings["state_env"], "")
+            if not Path(staged_base).is_absolute() or not Path(staged_state).is_absolute():
+                raise ArchiveError("publisher must provide absolute worktree and staged-state paths")
+            base = Path(staged_base).resolve()
+            OUTPUT_DIR = base / relative
+            STATE_FILE = Path(staged_state) / STATE_FILE.name
+        wss = workspaces(cfg, base, token_dir)
         if cfg.get("enabled", True) is False:
             log("slack: disabled by configuration")
+        elif args.publish:
+            return cmd_publish(cfg, config_path, base, token_dir)
         elif args.list_channels:
             cmd_list_channels(wss)
         elif args.peek:
