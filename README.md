@@ -62,6 +62,7 @@ reusing that name removes the redirect.
 | `skills/realign/` | Evidence-based comparison of recent work with the user's objective |
 | `skills/secret-lint/` | Credential exposure audit procedure with redacted reporting |
 | `skills/privacy-lint/` | Publication privacy review with optional private identifier patterns |
+| `skills/chat-draft/` | Targeted chat reading and reply drafting through configured readers |
 | `skills/agent-session-extraction/src/agent_skills/sessions/` | Package-owned normalized-session runtime |
 | `skills/<name>/tests/` | Tests owned and runnable by that Skill |
 
@@ -201,6 +202,7 @@ or shared source directory. Run additional checks from the affected package:
 (cd skills/realign && uv run --locked skills-ref validate "$PWD")
 (cd skills/secret-lint && uv run --locked skills-ref validate "$PWD")
 (cd skills/privacy-lint && uv run --locked skills-ref validate "$PWD")
+(cd skills/chat-draft && uv run --locked skills-ref validate "$PWD")
 (cd skills/slack-archive && uv run --locked pytest tests)
 (cd skills/whatsapp-archive && uv run --locked pytest tests && npm ci --prefix bridge && npm test --prefix bridge)
 ```
