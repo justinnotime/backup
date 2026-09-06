@@ -26,7 +26,7 @@ class SkillLayoutTests(unittest.TestCase):
             environment.pop("PYTHONPATH", None)
             environment["PYTHONNOUSERSITE"] = "1"
             for skill_link in (absolute_link, relative_link):
-                for command in ("doctor", "extract", "reconcile"):
+                for command in ("doctor", "extract", "reconcile", "run"):
                     with self.subTest(skill_link=skill_link.parent.name, command=command):
                         result = subprocess.run(
                             [str(skill_link / "scripts" / command), "--help"],

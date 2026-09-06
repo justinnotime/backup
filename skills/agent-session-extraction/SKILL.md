@@ -29,6 +29,10 @@ Backup profile label.
 
 ## Operations
 
+- Use `scripts/run --config PATH` for scheduled extraction with an explicitly
+  configured external publisher. Its `--doctor` and `--dry-run` modes do not
+  invoke that publisher. See [scheduled extraction](references/scheduled.md)
+  when configuring or migrating a scheduler entry point.
 - Run `scripts/doctor --manifest PATH` to check configuration, source-path
   policy, decoder availability, and redaction self-tests without decoding
   transcript text.
