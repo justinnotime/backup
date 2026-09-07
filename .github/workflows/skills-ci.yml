@@ -324,6 +324,7 @@ jobs:
           bash tests/test-agent-boot-restart-guard.sh
           bash tests/test-agent-bus-cli.sh
           bash tests/test-fleet-lint.sh
+          bash tests/test-claude-statusline-orc.sh
           uv run --no-sync python scripts/merge-receipt.py --self-test
           uv run --no-sync python scripts/pr-green-unreviewed.py --self-test
           uv run --no-sync python scripts/pr-red-triage.py --self-test

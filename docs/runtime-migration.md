@@ -226,3 +226,25 @@ Keep machine-specific paths, identities and historical deployment evidence in
 the caller's private notes. A source deletion is complete only after the actual
 selected installation uses the public entry; other machines must apply their
 own configuration and activation steps.
+
+## Keep tests and instructions with their owner
+
+After removing a private implementation, remove tests whose only purpose was
+its forwarding wrapper, generated configuration copy, or retired file name.
+Public behavior tests belong inside the corresponding package, with synthetic
+inputs and package-owned CI. Transfer a missing regression before deleting its
+private copy; do not preserve a second implementation just to keep an old test.
+
+The consumer still needs tests that load its real private configuration and
+exercise private source selection, permissions, publication rules, and recovery.
+Similar public test names are not a substitute when they use synthetic policy.
+Group the remaining consumer checks by integration and private policy. Use a
+shared package-location helper rather than repeating an installation path in
+each test. Update explicit test commands when files move; runtime configuration
+paths need not move along with test files.
+
+Private Skill profiles should retain the caller's choices and rules. Reference
+the installed public package for its command manual and generic behavior.
+Move useful missing instructions into its existing public references, after
+removing personal examples. Prefer tests of executable examples and machine-read
+template fields over exact sentence matching that prevents ordinary editing.
