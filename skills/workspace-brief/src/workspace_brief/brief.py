@@ -12,6 +12,7 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from string import Template
 
 
 def expand(value: str, root: Path | None = None) -> str:
@@ -219,6 +220,20 @@ def health_lines(config: dict, root: Path, now: datetime) -> list[str]:
                 raise ValueError("invalid marker configuration")
             value = selected.get(marker_config["field"])
             if value is not None:
+                if selected.get("expand_environment") is True:
+                    configured = selected.get("environment", {})
+                    if not isinstance(configured, dict) or not all(
+                        isinstance(v, str) for v in configured.values()
+                    ):
+                        raise ValueError("invalid marker environment")
+                    environment = dict(os.environ)
+                    environment.update(
+                        {
+                            k: os.path.expanduser(Template(v).substitute(os.environ))
+                            for k, v in configured.items()
+                        }
+                    )
+                    value = os.path.expanduser(Template(value).substitute(environment))
                 if not isinstance(value, str) or not Path(value).is_absolute():
                     raise ValueError("marker path must be absolute")
                 marker = Path(value)
@@ -226,7 +241,7 @@ def health_lines(config: dict, root: Path, now: datetime) -> list[str]:
                     with marker.open(encoding="utf-8") as stream:
                         detail = stream.readline().strip()
                     lines.append(marker_config["line"].format(detail=detail, path=marker))
-        except (OSError, ValueError, TypeError, AttributeError):
+        except (OSError, ValueError, TypeError, AttributeError, KeyError):
             marker_error = True
             lines.append(marker_config.get("error_line", "  WARN configured marker unavailable"))
     overdue = 0

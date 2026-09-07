@@ -5,6 +5,20 @@ strict JSON: missing and unknown fields are errors. Every source entry must
 state `enabled`; no source is selected because a Backup profile happens to
 exist.
 
+Native configuration can set `expand_environment: true` to expand `$NAME`,
+`${NAME}` and leading `~/` in filesystem fields using the explicitly supplied
+environment. This applies to source paths, allowed roots, selected metadata,
+output repository and key-link source. Missing or empty variables fail; expansion
+does not execute a shell or infer node labels, authority, patterns or source
+selection. `$$` represents a literal dollar. Leave the option absent to retain
+literal path behavior in an existing manifest. Every expanded path must still
+be absolute and pass the same lexical/resolved confinement checks.
+
+Set `require_external_config: true` when the consumer requires its concrete
+manifest to be a regular file outside the output repository. The runtime then
+rejects repository-local manifest paths and manifest symlinks. Copy and review
+such files outside Git; the runtime never installs or rewrites them.
+
 ## Source authority
 
 Each `sources[]` entry names an opaque ID, harness, explicit or explicitly
@@ -18,6 +32,13 @@ resolved path. `symlinks=confined` permits only targets that remain under both
 the configured source and allowed resolved roots. `symlinks=reject` refuses
 any traversal. Use `forbidden_components` and `required_suffixes` as additional
 consumer defenses; they never replace root containment.
+
+The optional `forbidden_component_patterns` array adds case-sensitive shell-style
+patterns such as `excluded-*` for each path component. These patterns apply to
+configured paths, resolved targets, candidate files and separately selected
+metadata, including revalidation before reads. Existing `forbidden_components`
+remain exact matches. The consumer owns both lists; the package has no account
+or directory classification rules.
 
 `native-default` uses only the explicitly supplied `HOME` value. It is not a
 claim that the source belongs to a particular consumer.

@@ -138,3 +138,82 @@ Existing-worktree publication distinguishes post-rebase validation rejection
 (3) and rebase conflict (4), retaining the caller's worktree in both cases.
 Invalid command syntax exits 2. Writer and policy output may contain private
 data and belongs in the caller's private logs.
+
+## Native configured jobs
+
+Use `scripts/publish --config /private/job.json`. `--doctor` or `--dry-run`
+checks local configuration and selected executables without creating locks or
+worktrees, running writers, fetching Git, or publishing. It does not test remote
+credentials or inspect the contents of a reader's private configuration.
+
+```json
+{
+  "schema": "repository-publish-job/v1",
+  "repo": "~/projects/example",
+  "task": "archive",
+  "paths": ["archive"],
+  "subject": "sync: archive {timestamp}",
+  "state_dir": "~/.local/state/example/archive",
+  "lock": "~/.cache/example/archive.lock",
+  "publish_lock": "~/.cache/example/repository.lock",
+  "selection": "messages",
+  "steps": [
+    {
+      "id": "messages",
+      "argv": ["/path/to/reader", "--output", "{worktree}/archive", "--state", "{state}/cursor.json"]
+    }
+  ]
+}
+```
+
+Configuration fields use the existing command-line names with underscores:
+`repo`, `task`, `paths`, `sparse`, `subject`, `agent`, `state_dir`, `lock`,
+`scratch`, `publish_lock`, `remote`, `branch`, `attempts`, `retry_delay`,
+`lock_timeout`, `worktree_env`, `state_env`, `validate_command` and
+`message_command`. Paths/sparse can be arrays; policy commands are argument
+arrays, never JSON nested inside a string. Configured fields take precedence
+when also supplied on the command line. Omitted fields keep CLI/default values.
+
+An options-only configuration can omit `steps` and accept an external writer:
+
+```bash
+scripts/publish --config /private/publication.json --paths archive -- /path/to/writer
+```
+
+`steps` and an external writer are mutually exclusive. Configured jobs cannot
+be combined with existing-worktree publication or independent LFS verification.
+
+`environment` is an object of explicitly selected values. Strings support `~`,
+`$NAME`, `${NAME}`, `{config_dir}`, `{repository}` and `{timestamp}`. An
+`{"env": "NAME", "default": "value"}` value uses the nonempty caller variable
+or its declared default. Environment entries are resolved in their declared
+order; unset references fail. HOME and transaction-owned environment names
+cannot be replaced. Expansion never executes shell expressions. Put credentials
+in private files and pass references rather than embedding them in arguments.
+
+Step arguments additionally support `{worktree}` and `{state}`. Each step has
+a unique `id`, optional `group`, its `argv`, optional `environment`, and an
+`on_error` policy. `--steps name,group` overrides configured `selection`; `all`
+selects every step. Selection preserves declaration order. Unknown names fail.
+Unselected commands and their environment requirements are not executed.
+
+The default `on_error: "fail"` prevents publication and durable state promotion.
+`"continue"` logs a warning and allows the remaining steps and publication.
+Use it only when the caller intentionally accepts that reader's partial result;
+the reader must preserve its own checkpoint on failure. An unavailable executable
+or malformed operation always fails. All steps share one staged transaction.
+
+A step may replace `argv` with a simple file-copy operation:
+
+```json
+{"id": "archive-file", "copy": {
+  "source": "$EXPORT_SOURCE",
+  "directory": "archive/handoffs",
+  "name": "$EXPORT_FILENAME"
+}}
+```
+
+The source must be a regular file; it remains intact on success or failure.
+The destination directory is a relative owned path, and `name` must be a
+non-hidden filename without directory separators. Symlink escapes are rejected.
+Publication and LFS verification use the same transaction as command writers.

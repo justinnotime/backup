@@ -530,8 +530,198 @@ def prepare_args(args):
     return args
 
 
+def job_value(value, env: dict[str, str], context: dict[str, str]):
+    """Expand declared environment references, without evaluating shell code."""
+    if isinstance(value, dict):
+        if set(value) - {"env", "default"} or not isinstance(value.get("env"), str):
+            raise Failure("invalid environment selection")
+        value = env.get(value["env"]) or value.get("default")
+    if not isinstance(value, str) or "\0" in value:
+        raise Failure("job values must be strings")
+    for key, replacement in context.items():
+        value = value.replace("{" + key + "}", replacement)
+
+    def variable(match):
+        key = match.group(1) or match.group(2)
+        if key not in env:
+            raise Failure(f"required environment variable is unset: {key}")
+        return env[key]
+
+    value = re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)", variable, value)
+    if value == "~" or value.startswith("~/"):
+        value = env["HOME"] + value[1:]
+    return value
+
+
+def job_environment(values, env, context):
+    if not isinstance(values, dict):
+        raise Failure("job environment must be an object")
+    result = dict(env)
+    for key, value in values.items():
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+            raise Failure("invalid job environment name")
+        if key in {"HOME", "CODEX_HOME"} or key.startswith("REPOSITORY_PUBLISH_"):
+            raise Failure("job cannot replace reserved environment variables")
+        result[key] = job_value(value, result, context)
+    return result
+
+
+def load_job(args):
+    config = absolute(args.config)
+    data = json.loads(config.read_text(encoding="utf-8"))
+    fields = {
+        "repo",
+        "task",
+        "paths",
+        "sparse",
+        "subject",
+        "agent",
+        "state_dir",
+        "lock",
+        "scratch",
+        "publish_lock",
+        "remote",
+        "branch",
+        "attempts",
+        "retry_delay",
+        "lock_timeout",
+        "worktree_env",
+        "state_env",
+        "validate_command",
+        "message_command",
+    }
+    if not isinstance(data, dict) or data.get("schema") != "repository-publish-job/v1":
+        raise Failure("unsupported publication job schema")
+    if set(data) - fields - {"schema", "environment", "steps", "selection"}:
+        raise Failure("unknown publication job field")
+    if args.existing_worktree or args.verify_lfs:
+        raise Failure("a configured job cannot be combined with another publication mode")
+    context = {
+        "config_dir": str(config.parent),
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    args.job_env = job_environment(data.get("environment", {}), os.environ, context)
+    args.repo = job_value(data.get("repo", str(config.parent)), args.job_env, context)
+    context["repository"] = str(absolute(args.repo))
+    selection = args.steps or job_value(data.get("selection", "all"), args.job_env, context)
+    context["selection"] = selection
+    for key in fields & data.keys():
+        value = data[key]
+        if key in {"attempts", "retry_delay", "lock_timeout"}:
+            value = (
+                job_value(value, args.job_env, context)
+                if not isinstance(value, (int, float))
+                else value
+            )
+            value = int(value) if key == "attempts" else float(value)
+        elif key in {"validate_command", "message_command"}:
+            if not isinstance(value, list) or not value:
+                raise Failure("policy command must be a nonempty argument array")
+            value = json.dumps([job_value(item, args.job_env, context) for item in value])
+        elif key in {"paths", "sparse"} and isinstance(value, list):
+            values = [job_value(item, args.job_env, context) for item in value]
+            if any(not item or re.search(r"\s", item) for item in values):
+                raise Failure("owned and sparse path entries cannot contain whitespace")
+            value = " ".join(values)
+        else:
+            value = job_value(value, args.job_env, context)
+        setattr(args, key, value)
+    steps = data.get("steps")
+    args.job_context = context
+    if steps is None and args.writer and not args.steps:
+        args.job_steps = None
+        return args
+    if args.writer:
+        raise Failure("choose configured steps or an argument-array writer, not both")
+    if not isinstance(steps, list) or not steps:
+        raise Failure("job requires a nonempty steps array")
+    identities, groups = set(), set()
+    for step in steps:
+        if not isinstance(step, dict) or set(step) - {
+            "id",
+            "group",
+            "argv",
+            "copy",
+            "environment",
+            "on_error",
+        }:
+            raise Failure("invalid job step")
+        name = step.get("id", "")
+        group = step.get("group", name)
+        if (
+            not isinstance(name, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name)
+            or name in identities
+        ):
+            raise Failure("step identifiers must be unique simple names")
+        if not isinstance(group, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", group):
+            raise Failure("invalid step group")
+        identities.add(name)
+        groups.add(group)
+        if ("argv" in step) == ("copy" in step):
+            raise Failure("each step requires exactly one argv or copy operation")
+        if "argv" in step and (not isinstance(step["argv"], list) or not step["argv"]):
+            raise Failure("step argv must be a nonempty array")
+        if not isinstance(step.get("environment", {}), dict):
+            raise Failure("step environment must be an object")
+        if step.get("on_error", "fail") not in ("fail", "continue"):
+            raise Failure("invalid step failure policy")
+    chosen = set(selection.split(","))
+    if selection != "all" and ("" in chosen or chosen - identities - groups):
+        raise Failure("selection contains an unknown step or group")
+    args.job_steps = [
+        s
+        for s in steps
+        if selection == "all" or s["id"] in chosen or s.get("group", s["id"]) in chosen
+    ]
+    return args
+
+
+def configured_steps(args, root: Path, env: dict, *, inspect=False):
+    context = dict(args.job_context, worktree=str(root), state=env["REPOSITORY_PUBLISH_STATE"])
+    for step in args.job_steps:
+        if {args.worktree_env, args.state_env} & step.get("environment", {}).keys():
+            raise Failure("step cannot replace transaction environment aliases")
+        selected_env = job_environment(step.get("environment", {}), env, context)
+        if "copy" in step:
+            operation = step["copy"]
+            if not isinstance(operation, dict) or set(operation) != {"source", "directory", "name"}:
+                raise Failure("copy requires source, directory and name")
+            values = {k: job_value(v, selected_env, context) for k, v in operation.items()}
+            name = values["name"]
+            if not name or name.startswith(".") or Path(name).name != name or "\\" in name:
+                raise Failure("copy name must be a non-hidden filename")
+            directory = paths(values["directory"])
+            if len(directory) != 1:
+                raise Failure("copy directory must be one relative path")
+            target = root / directory[0] / name
+            if root.resolve() not in target.resolve().parents:
+                raise Failure("copy destination escapes worktree")
+            source = Path(values["source"])
+            if source.is_symlink() or not source.is_file():
+                raise Failure("copy source must be a regular file")
+            if not owned(str(target.relative_to(root)), args.selected):
+                raise Failure("copy destination is outside declared ownership")
+            if not inspect:
+                atomic_write(target, source.read_bytes())
+                target.chmod(0o644)
+            continue
+        argv = [job_value(item, selected_env, context) for item in step["argv"]]
+        if not argv[0] or shutil.which(argv[0], path=selected_env.get("PATH")) is None:
+            raise Failure(f"step {step['id']}: executable unavailable")
+        if inspect:
+            continue
+        log(f"step/{step['id']}: running")
+        result = subprocess.run(argv, cwd=root, env=selected_env, check=False)
+        if result.returncode:
+            message = f"step {step['id']} exited {result.returncode}"
+            if step.get("on_error", "fail") != "continue":
+                raise Failure(message + "; progress was not advanced")
+            log("WARN: " + message + "; continuing as configured")
+
+
 def transaction(args) -> int:
-    if not args.selected or not args.subject or not args.writer:
+    if not args.selected or not args.subject or not (args.writer or args.config):
         raise Failure("--paths, --subject and a writer command after -- are required")
     durable = absolute(args.state_dir)
     if durable == args.repo or args.repo in durable.parents:
@@ -583,7 +773,7 @@ def transaction(args) -> int:
             initial = text(worktree, "rev-parse", "HEAD")
             state_files(durable)
             shutil.copytree(durable, staged)
-            env = dict(os.environ)
+            env = dict(args.job_env if args.config else os.environ)
             env.update(
                 {
                     args.worktree_env: str(worktree),
@@ -596,10 +786,13 @@ def transaction(args) -> int:
                 }
             )
             log(f"txn/{args.task}: running writer")
-            writer = args.writer[1:] if args.writer[0] == "--" else args.writer
-            proc = subprocess.run(writer, cwd=worktree, env=env, check=False)
-            if proc.returncode:
-                raise Failure(f"writer exited {proc.returncode}; progress was not advanced")
+            if args.config and args.job_steps:
+                configured_steps(args, worktree, env)
+            else:
+                writer = args.writer[1:] if args.writer[0] == "--" else args.writer
+                proc = subprocess.run(writer, cwd=worktree, env=env, check=False)
+                if proc.returncode:
+                    raise Failure(f"writer exited {proc.returncode}; progress was not advanced")
             if text(worktree, "rev-parse", "HEAD") != initial:
                 raise Failure("writer must not create commits or change the checkout revision")
             selected = check_ownership(worktree, args.selected)
@@ -647,6 +840,10 @@ def parser() -> argparse.ArgumentParser:
         Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / "repository-publish"
     )
     p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--config", help="private repository-publish-job/v1 JSON")
+    p.add_argument("--steps", help="comma-separated configured step/group selection")
+    p.add_argument("--doctor", action="store_true")
+    p.add_argument("--dry-run", action="store_true")
     p.add_argument("--repo", default=os.getcwd())
     p.add_argument("--task", default="writer")
     p.add_argument("--paths", default="")
@@ -680,15 +877,36 @@ def main(argv: list[str] | None = None) -> int:
         return worktree_main(argv[1:])
     args = parser().parse_args(argv)
     try:
+        if args.config:
+            load_job(args)
+        elif args.steps or args.doctor or args.dry_run:
+            raise Failure("--steps, --doctor and --dry-run require --config")
         prepare_args(args)
         env = dict(
-            os.environ,
+            args.job_env if args.config else os.environ,
             REPOSITORY_PUBLISH_REPOSITORY=str(args.repo),
             REPOSITORY_PUBLISH_WORKTREE=str(args.repo),
             REPOSITORY_PUBLISH_SUBJECT=args.subject,
             REPOSITORY_PUBLISH_AGENT=args.agent,
         )
-        if args.verify_lfs:
+        if args.config and (args.doctor or args.dry_run):
+            inspect_env = dict(env, REPOSITORY_PUBLISH_STATE=str(absolute(args.state_dir)))
+            if args.job_steps:
+                configured_steps(args, args.repo, inspect_env, inspect=True)
+            else:
+                writer = args.writer[1:] if args.writer[0] == "--" else args.writer
+                if not writer or not shutil.which(writer[0], path=inspect_env.get("PATH")):
+                    raise Failure("writer executable unavailable")
+            print(
+                json.dumps(
+                    {
+                        "schema": "repository-publish-inspection/v1",
+                        "steps": [s["id"] for s in args.job_steps or []],
+                        "valid": True,
+                    }
+                )
+            )
+        elif args.verify_lfs:
             verify_lfs(args.repo, args.remote, args.verify_lfs, args.selected)
         elif args.existing_worktree:
             if not args.expected_branch or not (args.repo / ".git").is_file():

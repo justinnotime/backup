@@ -133,6 +133,50 @@ class RolloutControlTests(unittest.TestCase):
         self.assertEqual(observed_at, 1234)
         self.assertIn("starts=1 ends=1", detail)
 
+    def test_native_manifest_command_quoting_and_environment(self):
+        import shlex
+        artifact = self.artifact(command_argv=["python3", "${CONFIG_DIR}/a b.py", "literal $(ignored)"],
+                                 command_environment={"SAMPLE_CONFIG": "${CONFIG_DIR}/private file.json"})
+        filename = self.base / "manifest.json"
+        filename.write_text(json.dumps(self.manifest(artifact)))
+        actual = rc.read_manifest(filename)["artifacts"][0]["command"]
+        self.assertEqual(shlex.split(actual), ["/usr/bin/env", "SAMPLE_CONFIG=" + str(self.base / "private file.json"),
+                                             "python3", str(self.base / "a b.py"), "literal $(ignored)"])
+
+    def test_configured_source_query_is_explicit_and_failed_query_is_not_empty(self):
+        bundle = self.base / "selected bundle"
+        bundle.mkdir()
+        (bundle / "SKILL.md").write_text("Synthetic instructions")
+        query = [sys.executable, "-c", "import json; print(json.dumps({\"sample\": " + repr(str(bundle)) + "}))"]
+        self.settings.write_text(json.dumps({"rollout": {"skill_sources_command": query}}))
+        self.assertEqual(rc.skill_sources(self.repo), {"sample": bundle})
+        self.settings.write_text(json.dumps({"rollout": {"skill_sources_command": [sys.executable, "-c", "raise SystemExit(1)"]}}))
+        with self.assertRaisesRegex(rc.OperationError, "cannot read configured"):
+            rc.skill_sources(self.repo)
+
+    def test_configured_cron_query_failure_is_unknown_without_command_disclosure(self):
+        artifact = self.reexec_artifact("placeholder")
+        del artifact["cron_exact_line"]
+        artifact["cron_exact_line_command"] = [sys.executable, "-c", "raise SystemExit('private-placeholder')"]
+        self.write_sources(artifact)
+        self.env["ROLLOUT_CRONTAB_TEXT"] = ""
+        record = self.control(artifact).records()[0]
+        self.assertEqual(record["state"], "UNKNOWN", record)
+        self.assertNotIn("private-placeholder", record["detail"])
+
+    def test_configured_cron_query_matches_live_entry_and_rejects_extra_line(self):
+        expected = "10 * * * * /example/collect"
+        artifact = self.reexec_artifact("placeholder")
+        del artifact["cron_exact_line"]
+        artifact["cron_exact_line_command"] = [sys.executable, "-c", "print(" + repr(expected) + ")"]
+        self.write_sources(artifact)
+        self.env["ROLLOUT_CRONTAB_TEXT"] = expected + "\n"
+        record = self.control(artifact).records()[0]
+        self.assertIn("cron=exact", record["detail"])
+        artifact["cron_exact_line_command"][-1] = "print('extra\\nline')"
+        record = self.control(artifact).records()[0]
+        self.assertEqual(record["state"], "UNKNOWN", record)
+
     def test_manifest_strict_validation(self):
         data = self.manifest()
         rc.validate_manifest(data)

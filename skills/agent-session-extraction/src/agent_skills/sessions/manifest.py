@@ -11,6 +11,7 @@ from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from .configuration import expand_environment, require_external_config
 from .model import MANIFEST_SCHEMA_VERSION, SUPPORTED_HARNESSES
 
 DAY_SPLIT_MODES = ("off", "hybrid", "all")
@@ -41,6 +42,7 @@ _TOP_KEYS = {
     "publisher",
     "gates",
 }
+_CONFIG_OPTIONS = {"expand_environment", "require_external_config"}
 _SOURCE_KEYS = {
     "id",
     "enabled",
@@ -200,6 +202,7 @@ class RootPolicy:
     required_suffixes: tuple[str, ...]
     candidate_beneath_root: bool
     symlinks: str
+    forbidden_component_patterns: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -378,7 +381,7 @@ def _root_policy(value: Any) -> RootPolicy:
         "symlinks",
     }
     _required(cfg, keys, "source.root_policy")
-    _only(cfg, keys, "source.root_policy")
+    _only(cfg, keys | {"forbidden_component_patterns"}, "source.root_policy")
     lexical = tuple(
         _absolute(item, "source.root_policy.allowed_lexical_roots[]")
         for item in _string_list(
@@ -394,6 +397,9 @@ def _root_policy(value: Any) -> RootPolicy:
     forbidden = _string_list(cfg["forbidden_components"], "forbidden_components")
     if any(not item or "/" in item for item in forbidden):
         raise ManifestError("forbidden_components entries must be path components")
+    patterns = _string_list(cfg.get("forbidden_component_patterns", []), "forbidden_component_patterns")
+    if any(not item or "/" in item for item in patterns):
+        raise ManifestError("forbidden_component_patterns must match path components")
     suffixes = _string_list(cfg["required_suffixes"], "required_suffixes")
     if any(not item for item in suffixes):
         raise ManifestError("required_suffixes entries must not be empty")
@@ -404,6 +410,7 @@ def _root_policy(value: Any) -> RootPolicy:
         suffixes,
         _bool(cfg["candidate_beneath_root"], "candidate_beneath_root"),
         _enum(cfg["symlinks"], {"reject", "confined"}, "source.root_policy.symlinks"),
+        patterns,
     )
 
 
@@ -583,7 +590,7 @@ def _nonnegative_int(value: Any, name: str, *, minimum: int = 0) -> int:
 def _parse(data: Any, environ: Mapping[str, str]) -> Manifest:
     cfg = _mapping(data, "manifest")
     _required(cfg, _TOP_KEYS, "manifest")
-    _only(cfg, _TOP_KEYS, "manifest")
+    _only(cfg, _TOP_KEYS | _CONFIG_OPTIONS, "manifest")
     if cfg["schema_version"] != MANIFEST_SCHEMA_VERSION:
         raise ManifestError(f"unsupported manifest schema: {cfg['schema_version']!r}")
     node_label = _label(cfg["node_label"], "node_label")
@@ -1138,4 +1145,44 @@ def load_manifest(
         data = json.loads(raw)
     except (json.JSONDecodeError, UnicodeError) as exc:
         raise ManifestError("manifest is not valid UTF-8 JSON") from exc
-    return _parse(data, environ)
+    if isinstance(data, dict):
+        for name in _CONFIG_OPTIONS:
+            if name in data:
+                _bool(data[name], name)
+        if data.get("expand_environment"):
+            try:
+                _expand_manifest_paths(data, environ)
+            except ValueError as exc:
+                raise ManifestError("invalid configuration environment reference") from exc
+    manifest = _parse(data, environ)
+    if data.get("require_external_config"):
+        try:
+            require_external_config(Path(path), manifest.output.repository_root)
+        except ValueError as exc:
+            raise ManifestError(str(exc)) from exc
+    return manifest
+
+
+def _expand_manifest_paths(data: dict, environ: Mapping[str, str]) -> None:
+    """Expand only filesystem fields; labels, regular expressions and text stay literal."""
+    def field(mapping, key):
+        if isinstance(mapping, dict) and isinstance(mapping.get(key), str):
+            mapping[key] = expand_environment(mapping[key], environ)
+
+    field(data.get("output"), "repository_root")
+    publisher = data.get("publisher")
+    if isinstance(publisher, dict):
+        field(publisher.get("key_link"), "source")
+    sources = data.get("sources")
+    for source in sources if isinstance(sources, list) else []:
+        if not isinstance(source, dict):
+            continue
+        field(source.get("path"), "value")
+        field(source.get("decoder"), "sessions_metadata_path")
+        policy = source.get("root_policy")
+        if isinstance(policy, dict):
+            for key in ("allowed_lexical_roots", "allowed_resolved_roots"):
+                values = policy.get(key)
+                if isinstance(values, list):
+                    policy[key] = [expand_environment(item, environ) if isinstance(item, str)
+                                   else item for item in values]

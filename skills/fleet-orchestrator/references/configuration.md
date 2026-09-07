@@ -81,3 +81,32 @@ Artifact entries may set `source_roots` with absolute `working` and `canonical`
 paths when caller-owned deployment files live outside the public package.
 Staging reads the working source; installation requires matching published
 content from the canonical source. Both roots remain private configuration.
+
+## Native configuration and installation observations
+
+A caller can maintain `fleet-runtime/v1` directly in a private repository and
+link it to the selected configuration path. `${CONFIG_DIR}` refers to the actual
+source file's directory after following links. HOME, XDG config/state/cache
+paths and explicit environment references remain caller-owned. A value may use
+`{"env":"EXAMPLE_ROOT","default":"~/example","suffix":"/file.json"}`;
+the optional slash-prefixed suffix is joined and normalized. A nested default
+can select another environment value. This only selects values and never runs
+configuration code.
+
+For rollout observations, `rollout.skill_sources_command` optionally selects an
+explicit read-only argument vector that prints the existing name-to-source JSON
+object. This removes the need to store a second copy of a discovery installer's
+package selection. It takes precedence over `rollout.skill_sources`; a failed
+command or invalid/missing source fails the observation instead of returning an
+empty inventory. No command is discovered or inferred from a repository.
+
+A rollout artifact may provide `command_argv` and optional
+`command_environment` instead of a shell-quoted `command`. The reader resolves
+native configuration values and quotes the argument vector before the existing
+hook adapters inspect/install it. The schema accepts native environment values
+in command arguments, environment selections and source roots.
+An artifact may use `cron_exact_line_command` instead of `cron_exact_line` to
+query a caller-selected read-only command. Its output must be exactly one
+nonempty line. Failure is `UNKNOWN`; the observer does not substitute a guessed
+schedule. These queries do not grant permission to run jobs, restart services,
+or change hook trust.

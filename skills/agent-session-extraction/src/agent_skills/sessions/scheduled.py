@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import api
+from .configuration import expand_environment, require_external_config
 from .manifest import ManifestError
 from .model import Diagnostic, ReconcileReport
 from .reconcile import write_failure_marker
@@ -35,9 +36,18 @@ def load_schedule(path: Path) -> dict:
     cfg = json.loads(path.read_text())
     required = {"schema_version", "manifest", "repository_root", "publication"}
     if (not isinstance(cfg, dict) or not required <= cfg.keys()
-            or cfg.keys() - required - {"environment", "failure_marker", "validate_command", "preflight_command"}
+            or cfg.keys() - required - {"environment", "failure_marker", "validate_command", "preflight_command",
+                                                      "expand_environment", "require_external_config"}
             or cfg["schema_version"] != SCHEMA):
         raise ScheduleError("invalid_schedule")
+    for option in ("expand_environment", "require_external_config"):
+        if option in cfg and not isinstance(cfg[option], bool):
+            raise ScheduleError("invalid_schedule")
+    if cfg.get("expand_environment"):
+        try:
+            cfg = expand_schedule_environment(cfg)
+        except ValueError as exc:
+            raise ScheduleError("invalid_environment_reference") from exc
     for field in ("manifest", "repository_root", "failure_marker"):
         if field in cfg and (not isinstance(cfg[field], str) or not Path(cfg[field]).is_absolute()):
             raise ScheduleError("absolute_path_required")
@@ -61,6 +71,33 @@ def load_schedule(path: Path) -> dict:
         or not isinstance(v, str) or "\0" in v for k, v in env.items()
     ):
         raise ScheduleError("invalid_environment")
+    if cfg.get("require_external_config"):
+        try:
+            require_external_config(path, Path(cfg["repository_root"]))
+        except ValueError as exc:
+            raise ScheduleError("external_config_required") from exc
+    return cfg
+
+
+def expand_schedule_environment(cfg: dict) -> dict:
+    """Expand explicit values once; existing configurations retain literal argv."""
+    env = cfg.get("environment", {})
+    if not isinstance(env, dict) or any(not isinstance(v, str) for v in env.values()):
+        raise ScheduleError("invalid_environment")
+    cfg["environment"] = {key: expand_environment(value, os.environ) for key, value in env.items()}
+    environment = {**os.environ, **cfg["environment"]}
+    for field in ("manifest", "repository_root", "failure_marker"):
+        if isinstance(cfg.get(field), str):
+            cfg[field] = expand_environment(cfg[field], environment)
+    publication = cfg.get("publication")
+    commands = [(cfg, "validate_command"), (cfg, "preflight_command")]
+    if isinstance(publication, dict):
+        commands.append((publication, "command"))
+    for mapping, key in commands:
+        command = mapping.get(key)
+        if isinstance(command, list):
+            mapping[key] = [expand_environment(arg, environment) if isinstance(arg, str)
+                            else arg for arg in command]
     return cfg
 
 

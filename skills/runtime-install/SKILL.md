@@ -28,6 +28,11 @@ services, or run scheduled jobs. Optional `before_apply` commands are explicit
 caller-owned installation prerequisites; their external effects are not rolled
 back if crontab installation later fails.
 
+Configured Git hook links and a shared-checkout commit guard are documented
+in [git-hooks.md](references/git-hooks.md). Preview with `scripts/git-hooks
+--config /private/hooks.json --dry-run`; installation preserves unrecognized
+hooks and requires an explicit replacement selection.
+
 Read [configuration.md](references/configuration.md) for the JSON fields and
 synthetic examples. The package has no third-party runtime dependencies.
 Development dependencies are in the default `dev` dependency group. From this

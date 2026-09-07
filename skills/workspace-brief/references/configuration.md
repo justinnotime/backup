@@ -62,3 +62,8 @@ Install dependencies using `uv sync --locked --group dev` when developing.
 Normal execution needs only Python and, when selected, Git or the external
 queue reader. Copying this package alone is supported; configuration and private
 data remain at caller-selected locations.
+
+A marker-source JSON may opt into `expand_environment: true`: its string
+`environment` values expand against the process environment, then its selected
+marker path expands using those values. Missing variables produce the configured
+warning. The reader does not execute the source configuration or mutate it.
