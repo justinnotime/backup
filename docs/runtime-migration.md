@@ -28,6 +28,20 @@ credential storage without embedding credential values. A private policy command
 may remain when it expresses actual repository rules; it should not retain a
 second generic publisher, scheduler or client implementation.
 
+Prefer a validator's command interface over an adapter that imports its source.
+The [structure checker](../skills/structure-lint/references/configuration.md)
+can invoke configured argument arrays and consume structured findings. The
+[translation validator](../skills/prompt-translation/references/configuration.md)
+can inspect its configured output directory and emit TSV findings. Configure
+their locations and repository-specific selection privately, then delete the
+adapter and its duplicated path lookup. A compatibility inspection of historical
+output must be explicit; keep strict validation for newly published output.
+
+Remove checks of historical configuration when that configuration no longer
+controls execution. Preserve its provenance when needed, and test the current
+source manifest or other active authority instead. A historical source list
+must never become an implicit access grant during migration.
+
 Review the exact publication set before copying it into a public package.
 Use synthetic examples, fixtures and identities. Check error messages, comments,
 test metadata and dependency files as well as the main source. Removing a

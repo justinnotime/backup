@@ -697,14 +697,7 @@ def validate_legacy(path: Path, text: str, fields: dict[str, str]) -> list[str]:
     return errors
 
 
-def validate(
-    path: Path,
-    source_record_index: dict[str, list[dict[str, Any]]] | None = None,
-    source_index_errors: list[str] | None = None,
-    *,
-    allow_source_ahead: bool = False,
-) -> list[str]:
-    errors: list[str] = []
+def output_path_errors(path: Path) -> list[str]:
     try:
         resolved = path.resolve(strict=True)
         resolved.relative_to(OUTPUT_ROOT.resolve())
@@ -712,11 +705,35 @@ def validate(
         return ["path is missing or outside the configured output directory"]
     if path.is_symlink() or not path.is_file():
         return ["output must be a regular file, not a symlink"]
+    return []
+
+
+def validate(
+    path: Path,
+    source_record_index: dict[str, list[dict[str, Any]]] | None = None,
+    source_index_errors: list[str] | None = None,
+    *,
+    allow_source_ahead: bool = False,
+    legacy_source_only: bool = False,
+) -> list[str]:
+    errors = output_path_errors(path)
+    if errors:
+        return errors
     text = path.read_text(encoding="utf-8")
     fields = parse_frontmatter(text)
     daily = (
         fields.get("schema_version") == "2" or DAILY_FILENAME_RE.fullmatch(path.name) is not None
     )
+    if legacy_source_only:
+        if not text.startswith("---\n"):
+            return ["missing YAML frontmatter"]
+        if not daily:
+            source = fields.get("source", "")
+            if not source:
+                return ["frontmatter missing source"]
+            if not allowed_source(source):
+                return ["source is outside the configured source directory"]
+            return []
     if re.search("[ \\t]+$", text, re.MULTILINE):
         errors.append("output contains trailing whitespace")
     if GENERATED_MARKER not in text:
@@ -736,7 +753,7 @@ def validate(
     return errors
 
 
-def _main(argv=None) -> int:
+def arguments(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default=config.default_config())
     parser.add_argument("--root")
@@ -745,11 +762,44 @@ def _main(argv=None) -> int:
         action="store_true",
         help="allow new raw prompt records that the asynchronous derived ledger has not processed yet",
     )
-    parser.add_argument("paths", nargs="+", type=Path)
+    parser.add_argument(
+        "--scan-output",
+        action="store_true",
+        help="validate immediate Markdown files in the configured output directory, excluding README.md",
+    )
+    parser.add_argument(
+        "--legacy-source-only",
+        action="store_true",
+        help="inspect only provenance references in legacy files; daily ledgers remain fully validated",
+    )
+    parser.add_argument("--format", choices=["text", "tsv"], default="text")
+    parser.add_argument("paths", nargs="*", type=Path)
     args = parser.parse_args(argv)
+    if args.scan_output == bool(args.paths):
+        parser.error("select either --scan-output or explicit output paths")
+    return args
+
+
+def report_error(message: str, output_format: str, prefix: str = "[ERROR]") -> None:
+    if output_format == "tsv":
+        print("ERROR\t" + message.replace("\n", " ").replace("\r", " ").replace("\t", " "))
+    else:
+        print(f"{prefix} {message}", file=sys.stderr)
+
+
+def run_validation(args) -> int:
     configure(config.load(args.config, root=args.root))
+    if args.scan_output and not OUTPUT_ROOT.is_dir():
+        raise config.ConfigurationError("output-directory-missing-or-not-directory")
+    paths = (
+        sorted(path for path in OUTPUT_ROOT.glob("*.md") if path.name != "README.md")
+        if args.scan_output
+        else args.paths
+    )
     daily_paths = []
-    for path in args.paths:
+    for path in paths:
+        if output_path_errors(path):
+            continue
         try:
             fields = parse_frontmatter(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeError):
@@ -760,27 +810,29 @@ def _main(argv=None) -> int:
         _daily_source_record_index() if daily_paths else (None, None)
     )
     failed = False
-    for path in args.paths:
+    for path in paths:
         errors = validate(
             path,
             source_record_index=source_record_index,
             source_index_errors=source_index_errors,
             allow_source_ahead=args.allow_source_ahead,
+            legacy_source_only=args.legacy_source_only,
         )
         for error in errors:
-            print(f"[ERROR] {path}: {error}", file=sys.stderr)
+            report_error(f"{path}: {error}", args.format)
         failed = failed or bool(errors)
     return 1 if failed else 0
 
 
 def main(argv=None):
+    args = arguments(argv)
     try:
-        return _main(argv)
+        return run_validation(args)
     except config.ConfigurationError as error:
-        print("FAIL " + str(error), file=sys.stderr)
+        report_error(str(error), args.format, "FAIL")
         return 1
     except Exception:
-        print("FAIL prompt-pair validation could not complete", file=sys.stderr)
+        report_error("prompt-pair validation could not complete", args.format, "FAIL")
         return 1
 
 

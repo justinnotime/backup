@@ -39,7 +39,7 @@ content; use `layout` or `required_files` for required content.
 | `required_files` | `include`, `files` | Select directories and require each relative file under them. |
 | `forbidden_paths` | `include` | Report selected files, with optional `message`. Useful for an explicitly documented layout restriction. |
 | `forbidden_text` | `include`, `pattern` | Report the first matching line per file. Optional `ignore_case`, `first_lines`, `skip_first_line_pattern`, and `message`. This enforces a configured text convention; it cannot establish who authored text or whether an LLM processed it. |
-| `external` | `argv` | Execute an argument array without a shell, replacing `@root@` in arguments and setting the working directory to the root. The timeout defaults to 120 seconds. Output must be one `ERROR<TAB>message` or `WARN<TAB>message` per line. Invalid output, stderr, a timeout, or nonzero exit without an error fails the check. |
+| `external` | `argv` | Execute an argument array without a shell, replacing `@root@` in arguments and setting the working directory to the root. Optional `include`/`exclude` skips invocation when no path is selected. `environment_defaults` and `expand_environment` support explicitly configured external commands as described below. The timeout defaults to 120 seconds. Output must be one `ERROR<TAB>message` or `WARN<TAB>message` per line. Invalid output, stderr, a timeout, or nonzero exit without an error fails the check. |
 | `git_freshness` | none | Compare HEAD to `remote`/`branch` (defaults origin/main). `fetch` defaults false. An absent remote or failed fetch is skipped. `skip_environment` names an optional variable whose value `1` skips the check; command timeout defaults to 30 seconds. |
 
 The default text output ends with `=== Summary: N errors, M warnings ===`.
@@ -51,6 +51,48 @@ check cannot complete. The runtime never rewrites repository content.
 
 See [example.json](example.json) for a synthetic starting point. Keep personal
 paths, ownership rules, and external policy adapters in private configuration.
+
+## External command paths
+
+An external check inherits the process environment. Its optional
+`environment_defaults` object supplies defaults in declaration order: an existing
+nonempty value wins, otherwise the default string strictly expands `$VAR` or
+`${VAR}` from the inherited environment and preceding defaults. The child process
+receives those values; the checker's own environment is unchanged.
+
+Set `expand_environment: true` to expand the same variable syntax in each argv
+element, followed by a leading `~` or `~/` using that child environment's `HOME`.
+`@root@` is replaced last, so dollar signs in the repository path remain literal.
+Without this flag, argv retains its previous literal behavior except `@root@`.
+Missing variables, malformed substitutions, and a missing executable fail the
+check. Use `$$` for a literal dollar sign when expansion is enabled. This is
+single-pass substitution: shell expressions, nested defaults, globbing and
+command substitution are not supported or executed.
+
+For example, a caller can select one independently installed validator:
+
+```json
+{
+  "type": "external",
+  "include": ["Docs/**/*.md"],
+  "environment_defaults": {
+    "XDG_CONFIG_HOME": "$HOME/.config",
+    "DOCUMENT_VALIDATOR": "$HOME/.local/bin/document-validator",
+    "DOCUMENT_VALIDATOR_CONFIG": "$XDG_CONFIG_HOME/document-validator/config.json"
+  },
+  "expand_environment": true,
+  "argv": ["$DOCUMENT_VALIDATOR", "--config", "$DOCUMENT_VALIDATOR_CONFIG", "--root", "@root@"]
+}
+```
+
+With `include`, no matching path skips the command before resolving its
+environment. Unlike built-in file checks, an external selector retains matching
+directories and broken symlinks so the external validator can reject them.
+Selection controls whether to run; it does not append file paths to argv.
+Configure any file-selection arguments required by the external CLI.
+Package locations belong to the caller: this checker does not search other
+packages or import their source. Use a configured executable or installed
+discovery link, with explicit overrides for a nonstandard installation.
 
 Development checks run within this package:
 

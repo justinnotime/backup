@@ -82,3 +82,39 @@ Optional `pricing` maps exact model names, model families (`sonnet`, `opus`,
 `haiku`) or `default` to `input`, `output`, `cache_write` and `cache_read` rates,
 all in USD per million tokens. These are caller-supplied estimates, not current
 price claims. Without rates, the runtime labels monetary estimates unavailable.
+
+## Validation for repository checks
+
+Explicit output paths use strict validation by default. To inspect all immediate
+Markdown files in the configured output directory, excluding `README.md`, use:
+
+```bash
+scripts/validate --config /private/translation.json --root /work/task \
+  --scan-output --format tsv
+```
+
+`--scan-output` cannot be combined with positional paths and does not recurse
+into subdirectories. An empty output directory produces no findings after the
+configuration has been validated; missing or invalid configuration still fails.
+The configured output directory must exist and be a directory. A missing archive
+can be skipped by the calling checker before invoking this command.
+The command reads no credentials, calls no model, and writes no files.
+
+`--format tsv` writes one `ERROR<TAB>message` line per finding to stdout, including
+configuration failures. Tabs and newlines within messages are replaced with
+spaces. Success has no output. The default format retains diagnostics on stderr.
+Invalid CLI arguments use the normal argument-parser error and exit status.
+
+An existing archive can explicitly select `--legacy-source-only` for a repository
+inspection. Legacy files then need frontmatter and a `source` reference below
+the configured source directory. The reference must end in `.md` and cannot
+contain `..`; it may name an original file that has moved or no longer exists.
+This mode does not check legacy generated markers, translation bodies or hashes.
+It continues to reject output symlinks and files outside the selected output
+directory. Daily filenames and `schema_version: 2` files still receive complete
+ledger validation, so changing a legacy file to a daily format never bypasses it.
+
+For asynchronous capture, `--allow-source-ahead` separately permits newer source
+records. Neither inspection option replaces strict validation before publishing.
+Keep any decision to skip an absent archive in the calling repository checker;
+the validator always verifies its selected configuration when invoked.

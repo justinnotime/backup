@@ -1,10 +1,13 @@
 import copy
 import hashlib
+import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -240,6 +243,153 @@ class PromptPairValidationTest(unittest.TestCase):
         ):
             self.assertEqual(VALIDATOR.main(), 0)
         scan.assert_called_once_with()
+
+    def invoke_validation(self, *arguments):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            status = VALIDATOR.main(["--config", str(self.config_path), *arguments])
+        return status, stdout.getvalue(), stderr.getvalue()
+
+    def test_output_scan_requires_explicit_legacy_compatibility(self):
+        legacy = self.output_root / "legacy.md"
+        legacy.write_text("---\nsource: sources/prompts/renamed.md\n---\n")
+        with mock.patch.object(
+            VALIDATOR, "_daily_source_record_index", side_effect=AssertionError("source scan")
+        ):
+            strict, output, errors = self.invoke_validation("--scan-output", "--format", "tsv")
+            self.assertEqual(strict, 1)
+            self.assertIn("missing generated-file marker", output)
+            self.assertEqual(errors, "")
+            self.assertEqual(
+                self.invoke_validation("--scan-output", "--legacy-source-only", "--format", "tsv"),
+                (0, "", ""),
+            )
+            legacy.write_text("---\nsource: outside/file.md\n---\n")
+            status, output, errors = self.invoke_validation(
+                "--scan-output", "--legacy-source-only", "--format", "tsv"
+            )
+            self.assertEqual(status, 1)
+            self.assertIn("source is outside the configured source directory", output)
+            self.assertEqual(errors, "")
+
+    def test_scan_compatibility_still_validates_every_daily_ledger(self):
+        self.render_daily()
+        legacy = self.output_root / "legacy.md"
+        legacy.write_text("---\nsource: sources/prompts/renamed.md\n---\n")
+        self.source.write_text(
+            SOURCE_TEXT + "\n### 2026-07-19 02:00:00Z\n\nA later captured request.\n"
+        )
+        arguments = ("--scan-output", "--legacy-source-only", "--format", "tsv")
+        self.assertEqual(self.invoke_validation(*arguments)[0], 1)
+        self.assertEqual(self.invoke_validation(*arguments, "--allow-source-ahead"), (0, "", ""))
+        legacy.write_text("---\nschema_version: 2\nsource: sources/prompts/renamed.md\n---\n")
+        status, output, errors = self.invoke_validation(*arguments, "--allow-source-ahead")
+        self.assertEqual(status, 1)
+        self.assertIn("ledger", output)
+        self.assertEqual(errors, "")
+
+    def test_scan_is_read_only_nonrecursive_and_never_reads_credentials(self):
+        readme = self.output_root / "README.md"
+        readme.write_text("Documentation, not a generated pair.\n")
+        nested = self.output_root / "nested"
+        nested.mkdir()
+        (nested / "invalid.md").write_text("Outside this explicit scan.\n")
+        before = {p: p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
+        with mock.patch.object(
+            VALIDATOR.config, "credential_value", side_effect=AssertionError("credential read")
+        ):
+            self.assertEqual(
+                self.invoke_validation("--scan-output", "--format", "tsv"), (0, "", "")
+            )
+        self.assertEqual(before, {p: p.read_bytes() for p in self.root.rglob("*") if p.is_file()})
+
+    def test_legacy_compatibility_rejects_missing_header_and_escaped_sources(self):
+        path = self.output_root / "invalid\tlegacy.md"
+        for contents, message in (
+            ("No frontmatter\n", "missing YAML frontmatter"),
+            ("---\n---\n", "frontmatter missing source"),
+            ("---\nsource: sources/prompts/../../other.md\n---\n", "outside the configured"),
+            ("---\nsource: sources/prompts/original.txt\n---\n", "outside the configured"),
+        ):
+            with self.subTest(message=message):
+                path.write_text(contents)
+                status, output, errors = self.invoke_validation(
+                    "--scan-output", "--legacy-source-only", "--format", "tsv"
+                )
+                self.assertEqual(status, 1)
+                self.assertEqual(errors, "")
+                self.assertEqual(len(output.splitlines()), 1)
+                self.assertEqual(output.count("\t"), 1)
+                self.assertIn(message, output)
+
+    def test_scan_rejects_symlink_outputs_even_in_legacy_compatibility(self):
+        target = self.root / "outside.md"
+        target.write_text("---\nsource: sources/prompts/renamed.md\n---\n")
+        linked = self.output_root / "linked.md"
+        linked.symlink_to(target)
+        original_read = Path.read_text
+        reads = []
+
+        def read(path, *args, **kwargs):
+            reads.append(path)
+            return original_read(path, *args, **kwargs)
+
+        for selection in (["--scan-output"], [str(target)]):
+            with self.subTest(selection=selection), mock.patch.object(Path, "read_text", read):
+                status, output, errors = self.invoke_validation(
+                    *selection, "--legacy-source-only", "--format", "tsv"
+                )
+                self.assertEqual(status, 1)
+                self.assertIn("outside the configured output directory", output)
+                self.assertEqual(errors, "")
+                self.assertIn(self.config_path, reads)
+                self.assertNotIn(target, reads)
+                self.assertNotIn(linked, reads)
+
+    def test_scan_distinguishes_an_empty_directory_from_an_invalid_output_directory(self):
+        self.assertEqual(self.invoke_validation("--scan-output", "--format", "tsv"), (0, "", ""))
+        self.output_root.rmdir()
+        for kind in ["missing", "file"]:
+            with self.subTest(kind=kind):
+                if kind == "file":
+                    self.output_root.write_text("not a directory\n")
+                status, output, errors = self.invoke_validation("--scan-output", "--format", "tsv")
+                self.assertEqual(status, 1)
+                self.assertEqual(output, "ERROR\toutput-directory-missing-or-not-directory\n")
+                self.assertEqual(errors, "")
+
+    def test_tsv_configuration_failure_from_public_entry(self):
+        script = Path(VALIDATOR.__file__).resolve().parents[2] / "scripts/validate"
+        result = subprocess.run(
+            [
+                str(script),
+                "--config",
+                str(self.root / "missing.json"),
+                "--scan-output",
+                "--format",
+                "tsv",
+            ],
+            cwd=self.root,
+            env={
+                **os.environ,
+                "PROMPT_TRANSLATION_PYTHON": sys.executable,
+                "PYTHONDONTWRITEBYTECODE": "1",
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertTrue(result.stdout.startswith("ERROR\t"))
+        self.assertEqual(result.stderr, "")
+
+    def test_cli_requires_one_selection_method(self):
+        output = self.render_daily()
+        for arguments in ((), ("--scan-output", str(output))):
+            with self.subTest(arguments=arguments), redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as raised:
+                    VALIDATOR.main(["--config", str(self.config_path), *arguments])
+                self.assertEqual(raised.exception.code, 2)
 
     def test_daily_hash_and_input_hash_detect_source_change(self):
         output = self.render_daily()
