@@ -47,6 +47,11 @@ Backup profile label.
   records before conversation retention, writes private evidence, and cannot
   establish complete invoices or causal savings. It makes no model calls and
   does not run the archive publisher.
+- Use `scripts/summarize-usage --input LOCAL_USAGE_JSONL_GZ --output
+  NEW_LOCAL_DIRECTORY` to recompute descriptive statistics without rereading
+  session logs. Both analysis commands refuse output inside Git repositories.
+  Keep raw evidence on local disk and use the [report prompt](references/analysis-report-prompt.md)
+  for reviewed aggregate synthesis; generated output is never public by default.
 - Run `scripts/doctor --manifest PATH` to check configuration, source-path
   policy, decoder availability, and redaction self-tests without decoding
   transcript text.

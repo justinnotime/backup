@@ -13,8 +13,9 @@ scripts/analyze-usage --manifest /private/manifest.json \
 
 The interval is half-open and requires timezone-aware timestamps. The output
 must not exist. JSON and compressed JSONL are created inside a private directory.
-Do not choose an output inside a raw source or an archive publisher's owned
-subtree. These artifacts contain identifiers, timestamps, paths, usage and
+The command refuses output inside any Git worktree or object store (including
+symlink paths), a raw source or an archive publisher's owned subtree. Keep all
+raw and row-level evidence on local disk outside repositories. These artifacts contain identifiers, timestamps, paths, usage and
 configured labels: **they remain private even though prompt and tool text are
 not emitted**. Never publish an actual configuration or generated result as a
 package example. CLI error output suppresses arbitrary exception text.
@@ -25,6 +26,32 @@ snapshot hashes. `summary.json` records totals, diagnostics, tariff coverage,
 dimensions and cache-rule examples/counterexamples. A byte hash is unavailable
 for direct immutable SQLite snapshots; use a byte snapshot for reproducible
 content hashes. No output claims complete provider billing coverage.
+
+Recompute descriptive statistics from the enriched local observations without
+rereading the original session corpus:
+
+```bash
+scripts/summarize-usage --input /private/new-analysis/usage.jsonl.gz \
+  --output /private/new-statistics --bootstrap-seed 0
+```
+
+This writes `statistics.json` in a new directory outside Git, including source
+hash, coverage-aware costs, overlapping notification/action groups, and separate
+harness/model cache comparisons. The default 1,000 bootstrap samples resample
+whole sessions, sorted by identity, with the selected seed; intervals use
+nearest-rank 2.5% and 97.5% percentiles and require at least five sessions.
+Within-session contrasts require at least 20 short-gap and three long-gap
+observations. The wake/model gap table includes only the first operation after
+a wake with nonnegative observed gaps. Empty or entirely unpriced groups have
+null dollar totals. These are descriptive stability checks, not causal savings.
+`coordinate-receive` is the action label used for receive-only candidates;
+configure custom inbox tools with this label before extraction.
+
+Use the [report prompt](analysis-report-prompt.md) to turn reviewed local
+evidence into an aggregate explanation for the authorized audience. Only the
+reviewed synthesis belongs in that audience's repository. Even generated
+summaries may contain sensitive model or task labels; none is automatically
+safe for public publication.
 
 ## Decode and accounting contract
 

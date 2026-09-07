@@ -226,6 +226,16 @@ def write_jsonl(path, rows):
                 target.write((json.dumps(row, sort_keys=True) + "\n").encode())
 
 
+def validate_local_output(path):
+    """Keep private usage artifacts outside worktrees and Git object stores."""
+    for destination in {Path(path).absolute(), Path(path).resolve()}:
+        for parent in (destination, *destination.parents):
+            if (parent / ".git").exists() or (
+                (parent / "HEAD").is_file() and (parent / "objects").is_dir()
+            ):
+                raise ValueError("analysis output must be outside Git repositories")
+
+
 def run_analysis(manifest_path, output, *, start, end, config=None):
     """Read only configured sources and write a new private result directory."""
     config = config or {}
@@ -246,6 +256,7 @@ def run_analysis(manifest_path, output, *, start, end, config=None):
         for root in [*roots, *(p.resolve() for p in owned)]
     ):
         raise ValueError("analysis output overlaps a source or archive subtree")
+    validate_local_output(output)
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
     rows, events, inventory, counts = {}, {}, [], Counter()
     seen_payloads = set()

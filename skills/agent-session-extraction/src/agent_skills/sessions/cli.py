@@ -43,12 +43,21 @@ def _parser() -> argparse.ArgumentParser:
     compare.add_argument("--manifest", required=True)
     compare.add_argument("--failure-marker", type=Path)
     compare.add_argument("--day-split", choices=("off", "hybrid", "all"))
-    usage = commands.add_parser("analyze-usage", help="write private usage and activity observations")
+    usage = commands.add_parser(
+        "analyze-usage", help="write private usage and activity observations"
+    )
     usage.add_argument("--manifest", required=True)
     usage.add_argument("--start", required=True)
     usage.add_argument("--end", required=True)
     usage.add_argument("--output", type=Path, required=True)
     usage.add_argument("--config", type=Path)
+    statistics = commands.add_parser(
+        "summarize-usage", help="summarize local usage evidence"
+    )
+    statistics.add_argument("--input", type=Path, required=True)
+    statistics.add_argument("--output", type=Path, required=True)
+    statistics.add_argument("--bootstrap-seed", type=int, default=0)
+    statistics.add_argument("--bootstrap-resamples", type=int, default=1000)
     return parser
 
 
@@ -59,10 +68,31 @@ def _emit(value: object) -> None:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        if args.command == "summarize-usage":
+            from .usage_statistics import summarize_file
+
+            _emit(
+                summarize_file(
+                    args.input,
+                    args.output,
+                    seed=args.bootstrap_seed,
+                    resamples=args.bootstrap_resamples,
+                )
+            )
+            return 0
         if args.command == "analyze-usage":
             from .usage_analysis import run_analysis
+
             config = json.loads(args.config.read_text()) if args.config else {}
-            _emit(run_analysis(args.manifest, args.output, start=args.start, end=args.end, config=config))
+            _emit(
+                run_analysis(
+                    args.manifest,
+                    args.output,
+                    start=args.start,
+                    end=args.end,
+                    config=config,
+                )
+            )
             return 0
         if args.command == "extract":
             report = run(
