@@ -193,3 +193,36 @@ and stop the replaced writer so two versions cannot write concurrently. Record
 what was actually checked and which machines remain unverified. Leave changing
 deployment inventories and run results in private evidence, rather than turning
 this public guide into a deployment log.
+
+## Retiring configuration generators and installed copies
+
+Prefer native configuration accepted by the public program. When removing a
+configuration generator, record the previous input format, replacement file,
+variable expansion rules and how existing customized files are preserved.
+Installation settings can be supplied directly to `runtime-install`; ordered
+archive commands and file publication can use `repository-publish --config`.
+Keep source authorization and repository-specific validation in private policy.
+
+Check installed artifacts independently of source. A Git hook copied before a
+migration can still contain an old checkout path after the repository source has
+changed. The public Git hook installer links selected executable entries and
+backs up explicitly recognized replacements. Inspect local `core.hooksPath`:
+a redundant setting pointing at Git's default hook directory can be removed
+once verified; a shared custom directory needs coordinated treatment across
+all of its consumers. Do not overwrite a symlink during rollback by copying
+through it into the public executable.
+
+For every removed entry, the caller's migration notes should identify:
+
+- The old command and the complete replacement invocation.
+- Cron, services, Git/harness hooks, shell links and other repositories referring
+  to the entry, including settings outside Git.
+- Required configuration changes, source authorization, credentials references,
+  durable progress and task/shared lock paths.
+- Public/private version ordering, activation checks and the exact rollback
+  artifacts to preserve.
+
+Keep machine-specific paths, identities and historical deployment evidence in
+the caller's private notes. A source deletion is complete only after the actual
+selected installation uses the public entry; other machines must apply their
+own configuration and activation steps.

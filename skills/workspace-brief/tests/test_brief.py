@@ -405,3 +405,36 @@ def test_install_real_settings_backup_permissions_check_and_uninstall(tmp_path):
     assert snapshot(tmp_path) == before
     assert install.main(["--config", str(config), "uninstall"]) == 0
     assert json.loads(settings.read_text()) == {"other": True}
+
+
+def test_portable_marker_config_is_expanded_without_running_commands(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "different home"))
+    marker = write(tmp_path / "different home/state/failure", "retained failure\n")
+    job = write(
+        tmp_path / "job.json",
+        json.dumps(
+            {
+                "schema_version": "job/v1",
+                "expand_environment": True,
+                "environment": {"EXAMPLE_STATE": "$HOME/state"},
+                "failure": "${EXAMPLE_STATE}/failure",
+            }
+        ),
+    )
+    config = {
+        "heading": "Health",
+        "marker_source": {
+            "path": str(job),
+            "schema_version": "job/v1",
+            "field": "failure",
+            "line": "FAIL {detail} ({path})",
+        },
+    }
+    before = snapshot(tmp_path)
+    lines = brief.health_lines(config, tmp_path, NOW)
+    assert f"FAIL retained failure ({marker})" in lines
+    assert snapshot(tmp_path) == before
+    value = json.loads(job.read_text())
+    value["environment"]["EXAMPLE_STATE"] = "$UNSET_EXAMPLE_VARIABLE/state"
+    job.write_text(json.dumps(value))
+    assert "  WARN configured marker unavailable" in brief.health_lines(config, tmp_path, NOW)

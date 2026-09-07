@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import sys
 import tempfile
 import unittest
@@ -43,6 +44,20 @@ class RuntimeConfigTests(unittest.TestCase):
         path.write_text('{"hook":"echo unsafe"}')
         with self.assertRaises(ValueError):
             cfg.command("hook", env=env)
+
+    def test_native_defaults_and_config_relative_paths_follow_symlink(self):
+        source = self.root / "private/config.json"
+        source.parent.mkdir()
+        source.write_text(json.dumps({"paths": {
+            "selected": {"env": "CHOSEN_ROOT", "default": "~/packages", "suffix": "/tool"},
+            "policy": "${CONFIG_DIR}/policy.json"}}))
+        link = self.root / "linked.json"
+        link.symlink_to("private/config.json")
+        env = {**self.env, "FLEET_ORCHESTRATOR_CONFIG": str(link)}
+        self.assertEqual(cfg.path("paths.selected", env=env), Path(env["HOME"]) / "packages/tool")
+        self.assertEqual(cfg.path("paths.policy", env=env), source.parent / "policy.json")
+        env["CHOSEN_ROOT"] = str(self.root / "custom package")
+        self.assertEqual(cfg.path("paths.selected", env=env), self.root / "custom package/tool")
 
     def test_invalid_encoding_does_not_echo_configuration(self):
         path = self.root / "config.json"

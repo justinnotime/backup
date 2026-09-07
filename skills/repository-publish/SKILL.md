@@ -15,6 +15,11 @@ persistent task worktrees, preserve unpublished branches after directory loss,
 and run explicit validators in temporary historical checkouts. See the
 [command contract](references/commands.md) before selecting those operations.
 
+A native `--config` job can declare ordered command steps or file copies.
+Use `--doctor` for local inspection and `--steps` for an explicit configured
+selection. Keep failure policy and source selection in private configuration;
+see the [configured job contract](references/commands.md#native-configured-jobs).
+
 The caller selects the repository, remote branch, writer command, owned paths
 and private state directory. Keep credentials, account selection and repository
 rules in private configuration. Existing authorization for the scheduled writer

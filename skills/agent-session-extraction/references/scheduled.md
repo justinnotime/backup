@@ -18,6 +18,24 @@ The schedule JSON contains:
 | `failure_marker` | Optional absolute path for a sanitized failure report |
 | `preflight_command` | Optional read-only argument array checking consumer policy before every mode, including doctor and dry-run |
 | `validate_command` | Optional argument array validating the generated output |
+| `expand_environment` | Optional boolean enabling explicit environment references in paths, environment values and command arguments |
+| `require_external_config` | Optional boolean rejecting a config inside the selected repository or a config symlink |
+
+Concrete native JSON can be installed without a configuration generator. With
+`expand_environment: true`, `$NAME`, `${NAME}`, and leading `~/` expand once;
+missing or empty referenced variables fail before publication. `$$` is a literal
+dollar. Shell expressions, default-value operators, command substitutions and
+recursive expansion are not evaluated. Environment values expand against the
+process environment first; paths and command arguments then use that environment
+plus the configured overrides. Omit the option to preserve literal strings in
+an existing schedule. Keep node identity and source authority in the separately
+reviewed manifest; environment expansion does not choose sources.
+
+Copy a native configuration to a private regular file before enabling
+`require_external_config`. A selected config is never rewritten by the runtime.
+An existing scheduler calling `--config` does not need a new entry merely because
+its deployment stopped using a generator. Other readers of fields such as
+`failure_marker` must use the same explicit environment or retain concrete paths.
 
 The publisher receives the extraction command appended to its argument array.
 For a publisher using `--` before its writer, include that delimiter at the end

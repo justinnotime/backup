@@ -15,6 +15,8 @@ import tempfile
 from itertools import pairwise
 from pathlib import Path
 
+from runtime_install.config import load_config
+
 
 class InstallError(Exception):
     pass
@@ -164,7 +166,8 @@ def link_plan(config):
         if (
             replacement_available
             and target.is_symlink()
-            and os.readlink(target) in retired["owned_targets"]
+            and os.path.normpath(os.readlink(target))
+            in [os.path.normpath(value) for value in retired["owned_targets"]]
         ):
             operations.append({"path": str(target), "action": "remove"})
     names = [item["path"] for item in operations]
@@ -262,6 +265,41 @@ def tokens(line):
     return result
 
 
+def job_line(job):
+    """Quote a caller-selected schedule, argument vector and output path."""
+    if not isinstance(job, dict):
+        raise InstallError("invalid cron job")
+    schedule = string(job.get("schedule"), "cron schedule")
+    if len(schedule.split()) != 5:
+        raise InstallError("cron schedule must have five fields")
+    env = []
+    for name, value in job.get("environment", {}).items():
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            raise InstallError("invalid cron environment name")
+        if value:
+            env.append(name + "=" + shlex.quote(string(value)))
+    parts = [*env, shlex.join(argv(job.get("argv")))]
+    if job.get("log"):
+        parts.extend([">>", shlex.quote(str(path(job["log"]))), "2>&1"])
+    line = schedule + " " + " ".join(parts)
+    if "%" in line:
+        raise InstallError("structured cron jobs do not support percent characters")
+    return line
+
+
+def cron_config(config):
+    if "jobs" not in config:
+        return config
+    if "lines" in config:
+        raise InstallError("configure either cron jobs or lines, not both")
+    result = dict(config)
+    jobs = config["jobs"]
+    if not isinstance(jobs, list):
+        raise InstallError("cron jobs must be an array")
+    result["lines"] = [job_line(job) for job in jobs]
+    return result
+
+
 def cron_text(original, config):
     begin, end = [string(v, "marker") for v in config["markers"]]
     blocks = [[begin, end]] + config.get("legacy_markers", [])
@@ -288,9 +326,7 @@ def cron_text(original, config):
                 raise InstallError("refusing nested cron marker block")
             intervals.append((a, b))
     intervals.sort()
-    if any(
-        a <= previous_b for (_, previous_b), (a, _) in pairwise(intervals)
-    ):
+    if any(a <= previous_b for (_, previous_b), (a, _) in pairwise(intervals)):
         raise InstallError("refusing overlapping cron marker blocks")
     remove = [argv(item) for item in config.get("remove_commands", [])]
     kept = []
@@ -403,12 +439,14 @@ def main(kind, args=None):
     parser.add_argument("--dry-run", action="store_true")
     if kind == "skills":
         parser.add_argument("--print-sources", action="store_true")
+    else:
+        parser.add_argument(
+            "--print-job",
+            help="print one configured cron job without checks or installation",
+        )
     options = parser.parse_args(args)
     try:
-        if options.config == "-":
-            config = json.load(sys.stdin)
-        else:
-            config = json.loads(Path(options.config).read_text())
+        config = load_config(options.config)
         if (
             not isinstance(config, dict)
             or config.get("schema") != "runtime-install/v1"
@@ -416,7 +454,20 @@ def main(kind, args=None):
         ):
             raise InstallError("invalid installation configuration")
         if kind == "cron":
-            install_cron(config, dry_run=options.dry_run)
+            if options.print_job:
+                jobs = [
+                    job
+                    for job in config.get("jobs", [])
+                    if job.get("id") == options.print_job
+                ]
+                if len(jobs) != 1:
+                    raise InstallError(
+                        "configured cron job selection is missing or ambiguous"
+                    )
+                print(job_line(jobs[0]))
+            else:
+                config = cron_config(config)
+                install_cron(config, dry_run=options.dry_run)
         else:
             sources, operations = link_plan(config)
             if options.print_sources:

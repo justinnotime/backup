@@ -57,7 +57,7 @@ ARTIFACT_KEYS = {
     "copy_source", "observer", "config", "format", "events", "command",
     "trust_required", "package", "required_row", "cron_exact_line",
     "observation_log", "max_observation_age_s", "context_loading",
-    "source_roots",
+    "source_roots", "cron_exact_line_command", "command_argv", "command_environment",
 }
 REQUIRED_ARTIFACT_KEYS = {"id", "class", "harness", "seat", "activation", "target_state", "install"}
 ARTIFACT_CLASSES = {
@@ -152,7 +152,14 @@ def read_manifest(path: Path) -> dict[str, Any]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ManifestError(f"cannot read manifest {path}: {exc}") from exc
+    data = cfg.resolve(data, config_directory=path.resolve().parent)
     validate_manifest(data)
+    for artifact in data["artifacts"]:
+        if "command_argv" in artifact:
+            environment = artifact.get("command_environment", {})
+            prefix = (["/usr/bin/env", *[key + "=" + value for key, value in environment.items()]]
+                      if environment else [])
+            artifact["command"] = shlex.join([*prefix, *artifact["command_argv"]])
     return data
 
 
@@ -206,6 +213,21 @@ def validate_manifest(data: Any) -> None:
             for location in roots.values():
                 if not isinstance(location, str) or not Path(cfg.expand(location)).is_absolute():
                     raise ManifestError(f"{where}.source_roots must be absolute paths")
+        for key in ("cron_exact_line_command", "command_argv"):
+            if key in artifact and (not isinstance(artifact[key], list) or not artifact[key]
+                                    or any(not isinstance(arg, str) or not arg or "\0" in arg
+                                           for arg in artifact[key])):
+                raise ManifestError(f"{where}.{key} must be an argument array")
+        if "command_argv" in artifact and "command" in artifact:
+            raise ManifestError(f"{where} must select command or command_argv")
+        environment = artifact.get("command_environment", {})
+        if not isinstance(environment, dict) or any(
+                not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key)
+                or not isinstance(value, str) or "\0" in value
+                for key, value in environment.items()):
+            raise ManifestError(f"{where}.command_environment is invalid")
+        if "cron_exact_line" in artifact and "cron_exact_line_command" in artifact:
+            raise ManifestError(f"{where} must select one cron expectation")
         if artifact.get("events") and not all(isinstance(x, str) and x for x in artifact["events"]):
             raise ManifestError(f"{where}.events must be non-empty strings")
         # Destination/config roots are fixed fields interpreted by reviewed
@@ -216,9 +238,14 @@ def validate_manifest(data: Any) -> None:
 
 
 def skill_sources(root: Path) -> dict[str, Path]:
-    """Read configured Skill locations without executing an installer."""
+    """Read configured Skill locations or an explicit read-only source command."""
     try:
-        values = cfg.get("rollout.skill_sources", {})
+        query = cfg.command("rollout.skill_sources_command")
+        if query:
+            result = subprocess.run(query, capture_output=True, text=True, timeout=30, check=True)
+            values = json.loads(result.stdout)
+        else:
+            values = cfg.get("rollout.skill_sources", {})
         if not isinstance(values, dict) or not values:
             raise ValueError("empty skill selection")
         sources = {}
@@ -851,7 +878,18 @@ class ControlPlane:
                 # same invocation but a changed prefix/redirect (e.g.
                 # NW_TMUX_SERVER=... injected ahead of the command) is exactly
                 # the drift this row exists to catch, and a substring passes it.
-                expected = expand_vars(artifact["cron_exact_line"], self.env)
+                if "cron_exact_line_command" in artifact:
+                    query = [expand_vars(arg, self.env) for arg in artifact["cron_exact_line_command"]]
+                    try:
+                        command = subprocess.run(query, env=self.env, capture_output=True, text=True,
+                                                 timeout=30, check=True)
+                    except (OSError, subprocess.SubprocessError):
+                        raise OperationError("cannot read configured cron expectation") from None
+                    expected = command.stdout.rstrip("\n")
+                    if not expected or any(char in expected for char in "\r\n\0"):
+                        raise OperationError("configured cron expectation is not one line")
+                else:
+                    expected = expand_vars(artifact["cron_exact_line"], self.env)
                 cron_lines = [ln.strip() for ln in crontab.splitlines()
                               if ln.strip() and not ln.strip().startswith("#")]
                 cron_ok = expected in cron_lines

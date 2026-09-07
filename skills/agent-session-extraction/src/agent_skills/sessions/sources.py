@@ -9,10 +9,11 @@ import stat
 import tempfile
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
+from fnmatch import fnmatchcase
 from pathlib import Path
 from urllib.parse import quote
 
-from .manifest import Discovery, SourceSpec
+from .manifest import Discovery, RootPolicy, SourceSpec
 from .model import SourceSnapshot
 
 
@@ -35,8 +36,10 @@ def _beneath(path: Path, roots: Iterable[Path]) -> bool:
     return False
 
 
-def _has_forbidden(path: Path, forbidden: tuple[str, ...]) -> bool:
-    return any(part in forbidden for part in path.parts)
+def _has_forbidden(path: Path, policy: RootPolicy) -> bool:
+    return any(part in policy.forbidden_components or any(
+        fnmatchcase(part, pattern) for pattern in policy.forbidden_component_patterns
+    ) for part in path.parts)
 
 
 def _has_suffix(path: Path, suffixes: tuple[str, ...]) -> bool:
@@ -70,7 +73,7 @@ def session_metadata_source(source: SourceSpec) -> SourceSpec | None:
 def validate_configured_path(source: SourceSpec) -> ValidatedRoot:
     policy = source.root_policy
     lexical = _lexical(source.path)
-    if _has_forbidden(lexical, policy.forbidden_components):
+    if _has_forbidden(lexical, policy):
         raise SourceAccessError("configured source has a forbidden path component")
     if not _has_suffix(lexical, policy.required_suffixes):
         raise SourceAccessError("configured source does not have a required suffix")
@@ -81,7 +84,7 @@ def validate_configured_path(source: SourceSpec) -> ValidatedRoot:
         resolved = source.path.resolve(strict=True)
     except OSError as exc:
         raise SourceAccessError("configured source is missing or unreadable") from exc
-    if _has_forbidden(resolved, policy.forbidden_components):
+    if _has_forbidden(resolved, policy):
         raise SourceAccessError("resolved source has a forbidden path component")
     if not _has_suffix(resolved, policy.required_suffixes):
         raise SourceAccessError("resolved source does not have a required suffix")
@@ -129,7 +132,7 @@ def validate_candidate(
 ) -> tuple[Path, str]:
     policy = source.root_policy
     lexical = _lexical(candidate)
-    if _has_forbidden(lexical, policy.forbidden_components):
+    if _has_forbidden(lexical, policy):
         raise SourceAccessError("candidate has a forbidden path component")
     if policy.candidate_beneath_root and not _beneath(lexical, (root.lexical,)):
         raise SourceAccessError("candidate is outside its configured source")
@@ -144,7 +147,7 @@ def validate_candidate(
         raise SourceAccessError("candidate resolves outside its policy")
     if policy.candidate_beneath_root and not _beneath(resolved, (root.resolved,)):
         raise SourceAccessError("candidate resolves outside its configured source")
-    if _has_forbidden(resolved, policy.forbidden_components):
+    if _has_forbidden(resolved, policy):
         raise SourceAccessError("resolved candidate has a forbidden path component")
     if policy.symlinks == "reject" and lexical != resolved:
         raise SourceAccessError("candidate traverses a symbolic link")
@@ -176,7 +179,7 @@ def _validate_open_descriptor(
         current_path, (root.resolved,)
     ):
         raise SourceAccessError("opened candidate escaped its configured source")
-    if _has_forbidden(current_path, source.root_policy.forbidden_components):
+    if _has_forbidden(current_path, source.root_policy):
         raise SourceAccessError("opened candidate has a forbidden path component")
     return opened
 
@@ -272,7 +275,7 @@ def _validate_sqlite_sidecar(
     )
     if not _beneath(resolved, allowed):
         raise SourceAccessError("SQLite sidecar escaped its resolved-path policy")
-    if _has_forbidden(resolved, source.root_policy.forbidden_components):
+    if _has_forbidden(resolved, source.root_policy):
         raise SourceAccessError("SQLite sidecar has a forbidden path component")
     return opened
 

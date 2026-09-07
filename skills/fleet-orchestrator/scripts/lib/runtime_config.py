@@ -44,6 +44,41 @@ def _unique(pairs: list[tuple[str, object]]) -> dict:
     return result
 
 
+def resolve(value, *, env=None, config_directory=None):
+    """Resolve native environment defaults without running configuration code."""
+    values = dict(os.environ if env is None else env)
+    values.setdefault("HOME", str(home(values)))
+    values.setdefault("XDG_CONFIG_HOME", str(home(values) / ".config"))
+    values.setdefault("XDG_STATE_HOME", str(home(values) / ".local/state"))
+    values.setdefault("XDG_CACHE_HOME", str(home(values) / ".cache"))
+    if config_directory is not None:
+        values["CONFIG_DIR"] = str(config_directory)
+
+    def visit(item):
+        if isinstance(item, str):
+            return expand(item, values)
+        if isinstance(item, list):
+            return [visit(child) for child in item]
+        if isinstance(item, dict):
+            if "env" in item and set(item) <= {"env", "default", "suffix"}:
+                name = item["env"]
+                if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+                    raise ValueError("invalid configuration environment name")
+                selected = values.get(name) or visit(item.get("default"))
+                if not isinstance(selected, str):
+                    raise ValueError("required configuration environment is missing")
+                if "suffix" in item:
+                    suffix = visit(item["suffix"])
+                    if not isinstance(suffix, str) or not suffix.startswith("/"):
+                        raise ValueError("configuration path suffix must begin with slash")
+                    selected = os.path.normpath(selected + suffix)
+                return expand(selected, values)
+            return {key: visit(child) for key, child in item.items()}
+        return item
+
+    return visit(value)
+
+
 def read(env: Mapping[str, str] | None = None) -> dict:
     values = os.environ if env is None else env
     selected = config_path(values)
@@ -63,7 +98,7 @@ def read(env: Mapping[str, str] | None = None) -> dict:
         raise ValueError("fleet configuration must be a JSON object")
     if result.get("schema", "fleet-runtime/v1") != "fleet-runtime/v1":
         raise ValueError("unsupported fleet configuration schema")
-    return result
+    return resolve(result, env=values, config_directory=selected.resolve().parent)
 
 
 def get(key: str, default=None, *, env: Mapping[str, str] | None = None):

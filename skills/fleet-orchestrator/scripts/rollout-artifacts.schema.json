@@ -171,16 +171,65 @@
             "additionalProperties": false,
             "properties": {
               "working": {
-                "type": "string"
+                "$ref": "#/$defs/configurationValue"
               },
               "canonical": {
-                "type": "string"
+                "$ref": "#/$defs/configurationValue"
               }
+            }
+          },
+          "cron_exact_line_command": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/$defs/configurationValue"
+            }
+          },
+          "command_argv": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/$defs/configurationValue"
+            }
+          },
+          "command_environment": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/$defs/configurationValue"
             }
           }
         },
         "additionalProperties": false
       }
+    }
+  },
+  "$defs": {
+    "configurationValue": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "required": [
+            "env"
+          ],
+          "properties": {
+            "env": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+            },
+            "default": {
+              "$ref": "#/$defs/configurationValue"
+            },
+            "suffix": {
+              "type": "string",
+              "pattern": "^/"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
     }
   }
 }

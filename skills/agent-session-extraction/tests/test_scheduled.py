@@ -219,6 +219,51 @@ def test_no_implicit_configuration(tmp_path):
     assert "--config" in result.stderr
 
 
+def test_native_environment_configuration_runs_in_another_home(scheduled):
+    cfg, invoke, repository, _, root = scheduled
+    cfg["expand_environment"] = True
+    cfg["environment"] = {"SELECTED_ROOT": str(root), "SELECTED_REPOSITORY": str(repository)}
+    cfg["repository_root"] = "${SELECTED_REPOSITORY}"
+    cfg["manifest"] = "$SELECTED_ROOT/manifest.json"
+    cfg["failure_marker"] = "~/state/failure.json"
+    cfg["publication"]["command"][1] = "$SELECTED_ROOT/publisher.py"
+    result = invoke()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout)["session_count"] == 1
+    assert git(repository, "rev-parse", "published")
+    assert not (root / "home/state/failure.json").exists()
+
+
+def test_missing_environment_reference_fails_before_publisher(scheduled, monkeypatch):
+    cfg, invoke, repository, _, root = scheduled
+    monkeypatch.delenv("MISSING_EXAMPLE_REPOSITORY", raising=False)
+    cfg["expand_environment"] = True
+    cfg["repository_root"] = "${MISSING_EXAMPLE_REPOSITORY}"
+    result = invoke()
+    assert json.loads(result.stdout)["code"] == "invalid_environment_reference"
+    assert result.returncode != 0
+    assert not (root / "output").exists()
+    assert git(repository, "status", "--porcelain") == ""
+
+
+@pytest.mark.parametrize("kind", ["inside", "symlink"])
+def test_selected_external_configuration_policy_is_enforced(scheduled, kind):
+    cfg, _, repository, _, root = scheduled
+    cfg["require_external_config"] = True
+    original = root / "private-schedule.json"
+    original.write_text(json.dumps(cfg))
+    path = repository / "schedule.json" if kind == "inside" else root / "linked-schedule.json"
+    if kind == "inside":
+        path.write_bytes(original.read_bytes())
+    else:
+        path.symlink_to(original)
+    result = subprocess.run([str(SKILL / "scripts/run"), "--config", str(path), "--doctor"],
+                            capture_output=True, text=True)
+    assert result.returncode != 0
+    assert json.loads(result.stdout)["code"] == "external_config_required"
+    assert not (root / "output").exists()
+
+
 @pytest.mark.parametrize("mode", ["--doctor", "--dry-run", "--write", "publish"])
 def test_preflight_failure_blocks_every_mode_without_relaying_output(scheduled, mode):
     cfg, invoke, repository, _, root = scheduled
