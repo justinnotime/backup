@@ -220,6 +220,161 @@ def test_external_checkers_receive_exact_root_and_cwd(tmp_path):
     assert findings == []
 
 
+def test_external_defaults_expand_once_and_preserve_selected_environment(tmp_path, monkeypatch):
+    root = tmp_path / "checkout ${UNDEFINED_ROOT_TEXT}"
+    root.mkdir()
+    home = tmp_path / "different home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("VALIDATOR_ROOT", "selected $UNCHANGED")
+    monkeypatch.setenv("VALIDATOR_CONFIG", "")
+    monkeypatch.delenv("VALIDATOR_CACHE", raising=False)
+    write(
+        root,
+        "capture.py",
+        "import json,os,sys\n"
+        "from pathlib import Path\n"
+        "Path('captured.json').write_text(json.dumps({'argv':sys.argv[1:],"
+        "'cache':os.environ['VALIDATOR_CACHE']}))\n",
+    )
+    findings = check(
+        root,
+        {
+            "type": "external",
+            "environment_defaults": {
+                "VALIDATOR_ROOT": "$MISSING_BUT_UNUSED",
+                "VALIDATOR_CONFIG": "${HOME}/settings.json",
+                "VALIDATOR_CACHE": "$VALIDATOR_CONFIG.cache",
+            },
+            "expand_environment": True,
+            "argv": [
+                sys.executable,
+                "@root@/capture.py",
+                "$VALIDATOR_ROOT",
+                "${VALIDATOR_CONFIG}",
+                "~/data",
+                "@root@",
+                "$$literal",
+            ],
+        },
+    )
+    assert findings == []
+    assert json.loads((root / "captured.json").read_text()) == {
+        "argv": [
+            "selected $UNCHANGED",
+            str(home / "settings.json"),
+            str(home / "data"),
+            str(root),
+            "$literal",
+        ],
+        "cache": str(home / "settings.json.cache"),
+    }
+    assert os.environ["VALIDATOR_CONFIG"] == ""
+    assert "VALIDATOR_CACHE" not in os.environ
+
+
+def test_external_environment_expansion_is_opt_in(tmp_path):
+    assert (
+        check(
+            tmp_path,
+            {
+                "type": "external",
+                "argv": [
+                    sys.executable,
+                    "-c",
+                    (
+                        "import sys; assert sys.argv[1:] == "
+                        "['$UNDEFINED_LITERAL', '~', '${UNDEFINED_LITERAL}']"
+                    ),
+                    "$UNDEFINED_LITERAL",
+                    "~",
+                    "${UNDEFINED_LITERAL}",
+                ],
+            },
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize("include,exclude", [(["Absent/*.md"], []), (["*.md"], ["*.md"])])
+def test_external_empty_selection_does_not_resolve_or_execute(tmp_path, include, exclude):
+    write(tmp_path, "source.md")
+    assert (
+        check(
+            tmp_path,
+            {
+                "type": "external",
+                "include": include,
+                "exclude": exclude,
+                "expand_environment": True,
+                "argv": ["$MISSING_VALIDATOR"],
+            },
+        )
+        == []
+    )
+    findings = check(
+        tmp_path,
+        {
+            "type": "external",
+            "include": ["source.md"],
+            "argv": [sys.executable, "-c", "raise SystemExit(7)"],
+        },
+    )
+    assert [finding.level for finding in findings] == ["ERROR"]
+
+
+@pytest.mark.parametrize("kind", ["directory", "broken_symlink"])
+def test_external_invalid_selected_paths_are_left_to_the_validator(tmp_path, kind):
+    candidate = tmp_path / "invalid.md"
+    if kind == "directory":
+        candidate.mkdir()
+    else:
+        candidate.symlink_to(tmp_path / "missing-target")
+    findings = check(
+        tmp_path,
+        {
+            "type": "external",
+            "include": ["*.md"],
+            "argv": [sys.executable, "-c", "raise SystemExit(7)"],
+        },
+    )
+    assert [finding.level for finding in findings] == ["ERROR"]
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [
+        {"expand_environment": True, "argv": ["$MISSING_VALIDATOR"]},
+        {"environment_defaults": {"FIRST": "$MISSING_VALIDATOR"}},
+        {"environment_defaults": {"FIRST": "$SECOND", "SECOND": "later"}},
+        {"expand_environment": True, "argv": ["$(touch must-not-exist)"]},
+        {"environment_defaults": {"INVALID-NAME": "value"}},
+        {"environment_defaults": {"VALIDATOR_ROOT": 1}},
+        {"expand_environment": "true"},
+        {"argv": ["/missing-synthetic-validator"]},
+    ],
+)
+def test_external_invalid_configuration_fails_before_a_success_report(
+    tmp_path, monkeypatch, capsys, rule
+):
+    for name in ("MISSING_VALIDATOR", "FIRST", "SECOND"):
+        monkeypatch.delenv(name, raising=False)
+    rule = {"type": "external", "argv": [sys.executable, "-c", "pass"], **rule}
+    config = write(
+        tmp_path,
+        "rules.json",
+        json.dumps(
+            {
+                "schema": "structure-lint/v1",
+                "checks": [rule],
+            }
+        ),
+    )
+    assert main(["--root", str(tmp_path), "--config", str(config), "--format", "json"]) == 2
+    assert json.loads(capsys.readouterr().out)["errors"] == 1
+    assert not (tmp_path / "must-not-exist").exists()
+
+
 def test_summary_formats_and_missing_configuration_fail_closed(tmp_path, capsys):
     config = write(
         tmp_path,

@@ -51,6 +51,10 @@ sources, model prompts or credential settings merely to make a failing run pass.
 Before publishing, run strict validation. `--allow-source-ahead` is for an
 asynchronous inspection where source capture may be newer than the translation;
 it does not replace strict publication validation.
+For a repository checker, `scripts/validate --scan-output --format tsv` selects
+the configured output directory. An explicit `--legacy-source-only` inspection
+can preserve older provenance references without weakening daily ledger checks;
+see [validation options](references/configuration.md#validation-for-repository-checks).
 
 For an existing schedule, `scripts/run --config /private/schedule.json` delegates
 Git operations to explicitly configured external commands. Read

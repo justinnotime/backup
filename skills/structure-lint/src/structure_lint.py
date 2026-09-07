@@ -10,6 +10,7 @@ import re
 import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from string import Template
 from typing import Any
 
 
@@ -73,7 +74,9 @@ class Checker:
             raise ValueError("configured repository paths must be relative and cannot contain '..'")
         return self.root / candidate
 
-    def select(self, rule: dict, key: str = "include", *, directories: bool = False) -> list[Path]:
+    def select(
+        self, rule: dict, key: str = "include", *, directories: bool | None = False
+    ) -> list[Path]:
         patterns = rule.get(key, [])
         if not isinstance(patterns, list) or not all(isinstance(p, str) for p in patterns):
             raise ValueError(f"{key} must be a list of relative glob patterns")
@@ -88,7 +91,7 @@ class Checker:
                 continue
             if any(re.search(p, relative) for p in rule.get("exclude_regex", [])):
                 continue
-            if path.is_dir() if directories else path.is_file():
+            if directories is None or (path.is_dir() if directories else path.is_file()):
                 selected.append(path)
         return selected
 
@@ -296,13 +299,34 @@ class Checker:
                     )
 
     def external(self, rule: dict):
+        if "include" in rule and not self.select(rule, directories=None):
+            return
         argv = rule["argv"]
         if not isinstance(argv, list) or not argv or not all(isinstance(v, str) for v in argv):
             raise ValueError("external argv must be a nonempty string array")
+        environment = os.environ.copy()
+        defaults = rule.get("environment_defaults", {})
+        if not isinstance(defaults, dict):
+            raise TypeError("external environment_defaults must be an object")
+        for name, value in defaults.items():
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) or not isinstance(value, str):
+                raise ValueError("external environment defaults require variable names and strings")
+            if not environment.get(name):
+                environment[name] = Template(value).substitute(environment)
+        expand = rule.get("expand_environment", False)
+        if not isinstance(expand, bool):
+            raise TypeError("external expand_environment must be a boolean")
+        if expand:
+            argv = [Template(value).substitute(environment) for value in argv]
+            argv = [
+                environment["HOME"] + value[1:] if value == "~" or value.startswith("~/") else value
+                for value in argv
+            ]
         argv = [v.replace("@root@", str(self.root)) for v in argv]
         result = subprocess.run(
             argv,
             cwd=self.root,
+            env=environment,
             text=True,
             capture_output=True,
             check=False,
