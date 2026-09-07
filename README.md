@@ -14,6 +14,11 @@ The repository works in both shapes:
 Labels are opaque. This repository does not assign account, organization, or
 trust semantics to them.
 
+For moving an existing implementation into an independent Skill, see the
+[runtime migration guide](docs/runtime-migration.md). It covers private
+configuration, duplicate-code removal, installation and verification on each
+machine.
+
 ## Repository name transition
 
 The GitHub repository was renamed from `backup` to `skills`, and the examples
