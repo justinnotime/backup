@@ -1,6 +1,6 @@
 ---
 name: agent-session-extraction
-description: Extract, audit, reconcile, and stage agent-harness sessions through the deterministic manifest-driven runtime. Use for Claude Code, Codex, OpenCode, DeepSeek Harness, Cursor, or OpenClaw session archives; do not use it to infer access from Backup profile labels or to switch a production writer without separate authorization.
+description: Extract, audit, reconcile, stage, and analyze token usage and activity in agent-harness sessions through the deterministic manifest-driven runtime. Use for Claude Code, Codex, OpenCode, DeepSeek Harness, Cursor, or OpenClaw session archives; do not use it to infer access from Backup profile labels or to switch a production writer without separate authorization.
 ---
 
 # Agent Session Extraction
@@ -40,6 +40,13 @@ Backup profile label.
   invoke that publisher. Both externally prepared and runtime-prepared encrypted
   worktrees are supported; configuration selects the existing manifest strategy. See [scheduled extraction](references/scheduled.md)
   when configuring or migrating a scheduler entry point.
+- Use `scripts/analyze-usage --manifest PATH --start TIMESTAMP --end TIMESTAMP
+  --output NEW_PRIVATE_DIRECTORY [--config PRIVATE_JSON]` for token categories,
+  trigger origins, action candidates and configured tariff comparisons. Read
+  [usage analysis](references/usage-analysis.md) first: it deliberately observes
+  records before conversation retention, writes private evidence, and cannot
+  establish complete invoices or causal savings. It makes no model calls and
+  does not run the archive publisher.
 - Run `scripts/doctor --manifest PATH` to check configuration, source-path
   policy, decoder availability, and redaction self-tests without decoding
   transcript text.

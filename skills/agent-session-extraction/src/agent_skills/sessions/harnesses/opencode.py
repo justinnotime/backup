@@ -71,7 +71,7 @@ class OpenCodeDecoder:
         connection.execute("PRAGMA query_only = ON")
         return connection
 
-    def decode(self, snapshot: SourceSnapshot) -> DecodeBatch:
+    def decode(self, snapshot: SourceSnapshot, *, observer=None) -> DecodeBatch:
         prefixes_value = snapshot.decoder_options.get(
             "synthetic_prompt_prefixes",
             snapshot.decoder_options.get("synthetic_prefixes", ()),
@@ -110,6 +110,9 @@ class OpenCodeDecoder:
         try:
             connection = self._connect(snapshot)
             try:
+                if observer is not None:
+                    observer.sqlite(connection)
+                    return DecodeBatch(sessions=())
                 rows = connection.execute(
                     """
                     SELECT id, title, directory, time_created, time_updated
