@@ -24,6 +24,8 @@ from .sources import (
     validate_configured_path,
 )
 
+from .telemetry import decode_telemetry
+
 
 def _environment(environ: Mapping[str, str] | None) -> Mapping[str, str]:
     if environ is not None:
@@ -145,6 +147,7 @@ __all__ = [
     "Manifest",
     "PipelineError",
     "decode_source_snapshots",
+    "decode_telemetry",
     "doctor",
     "extract_sessions",
     "load_manifest",

@@ -553,7 +553,7 @@ class DshDecoder:
             result.append("zstd")
         return tuple(result)
 
-    def decode(self, snapshot: SourceSnapshot) -> DecodeBatch:
+    def decode(self, snapshot: SourceSnapshot, *, observer=None) -> DecodeBatch:
         if snapshot.payload is None:
             return self._failure(snapshot, "DSH_SNAPSHOT_PAYLOAD_MISSING", "invalid")
 
@@ -586,6 +586,9 @@ class DshDecoder:
         except _DshFormatError as error:
             return self._failure(snapshot, error.code, "invalid")
 
+        if observer is not None:
+            observer.jsonl(list(enumerate(records)), malformed=int(torn))
+            return DecodeBatch(sessions=(), completeness="incomplete" if torn else "complete")
         recognized: Counter[str] = Counter()
         unknown: Counter[str] = Counter()
         user_markers = 0

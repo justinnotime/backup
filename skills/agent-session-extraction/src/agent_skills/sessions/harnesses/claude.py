@@ -222,7 +222,7 @@ class ClaudeDecoder:
             "conversational-subagents",
         )
 
-    def decode(self, snapshot: SourceSnapshot) -> DecodeBatch:
+    def decode(self, snapshot: SourceSnapshot, *, observer=None) -> DecodeBatch:
         if snapshot.harness != self.harness or snapshot.payload is None:
             return DecodeBatch(
                 sessions=(),
@@ -248,6 +248,9 @@ class ClaudeDecoder:
         records, malformed, grandfathered = _jsonl(
             snapshot.payload, grandfathered_hashes
         )
+        if observer is not None:
+            observer.jsonl(records, malformed=malformed + grandfathered)
+            return DecodeBatch(sessions=(), completeness="incomplete" if malformed else "complete")
         prefixes = _option_prefixes(options)
         recognized: Counter[str] = Counter()
         if grandfathered:

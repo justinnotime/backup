@@ -291,7 +291,7 @@ class CodexDecoder:
             "explicit-subagent-detection",
         )
 
-    def decode(self, snapshot: SourceSnapshot) -> DecodeBatch:
+    def decode(self, snapshot: SourceSnapshot, *, observer=None) -> DecodeBatch:
         if snapshot.harness != self.harness or snapshot.payload is None:
             return DecodeBatch(
                 sessions=(),
@@ -300,6 +300,9 @@ class CodexDecoder:
             )
 
         records, malformed = _jsonl(snapshot.payload)
+        if observer is not None:
+            observer.jsonl(records, malformed=malformed)
+            return DecodeBatch(sessions=(), completeness="incomplete" if malformed else "complete")
         session_id = _session_id(snapshot, records)
         first_meta = next(
             (
