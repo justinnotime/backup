@@ -282,16 +282,13 @@ def test_rates_and_dimensions_conserve_cost_without_double_counting_actions():
     rows = enrich([row], rates)
     report = summarize(rows)
     expected = 24 * 2 / 1_000_000
-    assert report["reference_usd"] == expected
+    assert report["reference_usd"] == pytest.approx(expected, rel=1e-12, abs=1e-15)
     for dimension in {d["dimension"] for d in report["dimensions"]}:
-        assert (
-            sum(
-                d["reference_usd"]
-                for d in report["dimensions"]
-                if d["dimension"] == dimension
-            )
-            == expected
-        )
+        assert sum(
+            d["reference_usd"]
+            for d in report["dimensions"]
+            if d["dimension"] == dimension
+        ) == pytest.approx(expected, rel=1e-12, abs=1e-15)
 
 
 def test_cache_comparison_uses_bounds_and_reports_counterexamples():
