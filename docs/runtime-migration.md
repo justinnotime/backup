@@ -34,6 +34,11 @@ test metadata and dependency files as well as the main source. Removing a
 username from a path does not make deployment history or private source layouts
 appropriate for publication.
 
+Before pushing, inspect the commit author and committer metadata as well as the
+files. Use the repository's approved public identity and email; a private global
+Git setting can otherwise add contact or machine details to an unchanged public
+diff. Make identity validation a required successful step before the push.
+
 ## Inspect current callers before deleting entries
 
 Inspect the current checkout and the actual installation on each affected
